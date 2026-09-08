@@ -25,7 +25,8 @@ window.CONFIG = {
   // users to sign up" switch in Supabase, which is server-side.
   ALLOW_SIGNUP: false,
 
-  // Cosmetic only.
+  // Shown at the bottom of Settings. Bump it whenever you push a change,
+  // so you can tell at a glance whether a device has picked the change up.
   APP_NAME: 'Assistant',
-  VERSION: '1.0.0'
+  VERSION: '1.1 — sync fix'
 };
