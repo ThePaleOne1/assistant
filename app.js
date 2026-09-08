@@ -556,6 +556,14 @@
     function commit() {
       clearTimeout(timer);
       timer = null;
+
+      /* Only ever write back something you actually typed. An input that
+         merely holds a stale value — because this row was just changed on
+         another device — must not push that stale value into the model, or
+         it overwrites the incoming edit and syncs the overwrite back. */
+      if (!input.__dirty) return;
+      input.__dirty = false;
+
       var it = Store.byId(id);
       if (!it || it[field] === input.value) return;
 
@@ -575,14 +583,12 @@
     input.__flush = commit;
 
     input.addEventListener('input', function () {
+      input.__dirty = true;
       clearTimeout(timer);
       timer = setTimeout(commit, 350);
     });
 
-    input.addEventListener('blur', function () {
-      commit();
-      input.__dirty = false;
-    });
+    input.addEventListener('blur', commit);
   }
 
   function flushAllText() {
@@ -1463,6 +1469,8 @@
     var timer = null;
     function commit() {
       clearTimeout(timer); timer = null;
+      if (!input.__dirty) return;          // see bindText — never write back a stale value
+      input.__dirty = false;
       var e = Store.timeById(id);
       if (!e || e[field] === input.value) return;
       var patch = {}; patch[field] = input.value;
@@ -1470,6 +1478,7 @@
     }
     input.__flush = commit;
     input.addEventListener('input', function () {
+      input.__dirty = true;
       clearTimeout(timer); timer = setTimeout(commit, 350);
     });
     input.addEventListener('blur', commit);
@@ -1479,6 +1488,8 @@
     var timer = null;
     function commit() {
       clearTimeout(timer); timer = null;
+      if (!input.__dirty) return;          // see bindText — never write back a stale value
+      input.__dirty = false;
       var e = Store.timeById(id);
       if (!e) return;
       var v = parseH(input.value);
@@ -1494,6 +1505,7 @@
     }
     input.__flush = commit;
     input.addEventListener('input', function () {
+      input.__dirty = true;
       clearTimeout(timer); timer = setTimeout(commit, 400);
     });
     input.addEventListener('blur', function () { commit(); closeHoursPop(); });
@@ -1584,6 +1596,7 @@
       b.onmousedown = function (ev) { ev.preventDefault(); };
       b.onclick = function () {
         anchor.value = fmtH(v);
+        anchor.__dirty = true;              // this one really is a deliberate edit
         if (anchor.__flush) anchor.__flush();
         closeHoursPop();
         moveGrid(id, 'task', 1, true);
