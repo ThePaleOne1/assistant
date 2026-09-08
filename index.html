@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131417" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Assistant</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ Loading ============ -->
+<section id="screen-loading" class="screen on">
+  <div class="card" style="text-align:center;box-shadow:none;border:0;background:none">
+    <p class="muted">Loading…</p>
+  </div>
+</section>
+
+<!-- ============ Not-configured screen ============ -->
+<section id="screen-setup" class="screen">
+  <div class="card">
+    <h1>Almost there</h1>
+    <p>This app isn't connected to your database yet.</p>
+    <p>Open <code>config.js</code> in this folder and paste in your Supabase URL and anon key, then reload.</p>
+    <p class="muted">Full instructions are in <code>SETUP.md</code>.</p>
+  </div>
+</section>
+
+<!-- ============ Sign in ============ -->
+<section id="screen-auth" class="screen">
+  <div class="card">
+    <h1>Assistant</h1>
+    <p class="muted" id="auth-sub">Sign in to sync across your devices.</p>
+    <form id="auth-form" autocomplete="on">
+      <label>Email
+        <input type="email" id="auth-email" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input type="password" id="auth-password" autocomplete="current-password" minlength="8" required>
+      </label>
+      <p class="err" id="auth-err" hidden></p>
+      <button type="submit" class="btn primary" id="auth-submit">Sign in</button>
+      <button type="button" class="btn ghost" id="auth-toggle">Create an account instead</button>
+    </form>
+  </div>
+</section>
+
+<!-- ============ App ============ -->
+<section id="screen-app" class="screen">
+  <header class="appbar">
+    <div class="appbar-title">
+      <strong id="list-title">Todo</strong>
+      <button class="pill" id="sync-pill" type="button" title="Sync status">•</button>
+    </div>
+    <div class="appbar-actions">
+      <button class="iconbtn" id="btn-search" title="Search (Ctrl+F)" aria-label="Search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      </button>
+      <button class="iconbtn" id="btn-archive" title="Archive" aria-label="Archive">
+        <svg viewBox="0 0 24 24"><path d="M3 7h18v3H3z"/><path d="M5 10v10h14V10"/><path d="M10 14h4"/></svg>
+      </button>
+      <button class="iconbtn" id="btn-settings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M4.5 4.5l1.9 1.9M17.6 17.6l1.9 1.9M2.8 12h2.6M18.6 12h2.6M4.5 19.5l1.9-1.9M17.6 6.4l1.9-1.9"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="searchbar" id="searchbar" hidden>
+    <input type="search" id="search-input" placeholder="Filter items…" autocomplete="off">
+    <button class="iconbtn" id="search-close" aria-label="Close search">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="todo" role="tab">Todo</button>
+    <button class="tab" data-tab="time" role="tab">Time</button>
+    <button class="tab" data-tab="overview" role="tab">Overview</button>
+  </nav>
+
+  <main>
+    <!-- Todo -->
+    <div class="view active" id="view-todo">
+      <div id="list" class="list"></div>
+      <div id="empty" class="list-empty" hidden>
+        <p>Nothing here yet.</p>
+        <p class="muted">Use the buttons below to add your first section or task.</p>
+      </div>
+      <div class="list-foot">
+        <button class="btn ghost small" id="add-section">+ Section</button>
+        <button class="btn ghost small" id="add-task-end">+ Task</button>
+      </div>
+      <div class="scroll-pad"></div>
+    </div>
+
+    <!-- Time log -->
+    <div class="view" id="view-time">
+      <div class="seg" role="tablist">
+        <button class="seg-btn active" data-pane="log">Log</button>
+        <button class="seg-btn" data-pane="insights">Insights</button>
+      </div>
+
+      <div class="pane active" id="pane-log">
+        <div class="daybar">
+          <button class="iconbtn" id="day-prev" aria-label="Previous day">
+            <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <div class="daybar-mid">
+            <strong id="day-label">—</strong>
+            <input type="date" id="day-picker" aria-label="Pick a date">
+          </div>
+          <button class="iconbtn" id="day-next" aria-label="Next day">
+            <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <button class="btn ghost small" id="day-today">Today</button>
+        </div>
+
+        <div class="daysum" id="day-summary"></div>
+
+        <div class="sheet" id="sheet">
+          <div class="sheet-head">
+            <span class="c-cat">Type</span>
+            <span class="c-task">Task</span>
+            <span class="c-hrs">Hours</span>
+            <span class="c-del"></span>
+          </div>
+          <div id="sheet-body"></div>
+          <div class="sheet-foot">
+            <button class="btn ghost small" id="row-add">+ Row</button>
+            <button class="btn ghost small" id="row-copy" title="Copy the rows you logged on your last working day">Repeat last day</button>
+            <span class="sheet-total" id="sheet-total"></span>
+          </div>
+        </div>
+
+        <datalist id="task-history"></datalist>
+      </div>
+
+      <div class="pane" id="pane-insights">
+        <div class="range" id="ins-range"></div>
+        <div id="insights"></div>
+      </div>
+
+      <div class="scroll-pad"></div>
+    </div>
+
+    <!-- Overview -->
+    <div class="view" id="view-overview">
+      <div id="overview"></div>
+      <div class="scroll-pad"></div>
+    </div>
+  </main>
+
+  <button class="fab" id="fab" title="Add task" aria-label="Add task">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</section>
+
+<!-- ============ Floating bits ============ -->
+<div id="toast" class="toast" hidden><span id="toast-msg"></span><button id="toast-action" class="linkbtn"></button></div>
+<div id="droppy" class="droppy" hidden></div>
+<div id="ghost" class="drag-ghost" hidden></div>
+
+<!-- Note preset popover -->
+<div id="notepop" class="pop" hidden>
+  <div class="pop-row" id="notepop-chips"></div>
+  <div class="pop-sep"></div>
+  <div class="pop-row" id="notepop-colours"></div>
+</div>
+
+<!-- Hours quick-pick -->
+<div id="hourspop" class="pop" hidden>
+  <div class="pop-row" id="hourspop-chips"></div>
+</div>
+
+<!-- Date popover -->
+<div id="datepop" class="pop" hidden>
+  <div class="pop-row" id="datepop-quick"></div>
+  <div class="pop-sep"></div>
+  <div class="pop-row">
+    <input type="date" id="datepop-input">
+  </div>
+  <div class="pop-row">
+    <button class="btn ghost small" id="datepop-clear">Clear due date</button>
+  </div>
+</div>
+
+<!-- Settings -->
+<dialog id="dlg-settings">
+  <form method="dialog" class="dlg-head">
+    <h2>Settings</h2>
+    <button class="iconbtn" value="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </form>
+  <div class="dlg-body">
+
+    <section class="group">
+      <h3>Phone reminders</h3>
+      <p class="muted small">Reminders are sent to the <b>ntfy</b> app on your phone. Install “ntfy” from the Play Store, then subscribe to the exact topic below.</p>
+      <label>ntfy topic
+        <div class="row-inline">
+          <input type="text" id="set-ntfy" placeholder="e.g. lachlan-todo-8f3k2p" spellcheck="false" autocomplete="off">
+          <button class="btn ghost small" id="set-ntfy-gen" type="button">Generate</button>
+        </div>
+      </label>
+      <p class="muted small">Treat this like a password — anyone who knows the topic can read your reminders.</p>
+      <button class="btn small" id="set-ntfy-test" type="button">Send test notification</button>
+    </section>
+
+    <section class="group">
+      <h3>Timing</h3>
+      <label>Timezone
+        <select id="set-tz"></select>
+      </label>
+      <label>Reminder times</label>
+      <div id="set-times" class="times"></div>
+      <button class="btn ghost small" id="set-time-add" type="button">+ Add a time</button>
+      <p class="muted small">You get a digest of what's due tomorrow and today, plus a separate alert for each overdue item.</p>
+    </section>
+
+    <section class="group">
+      <h3>Note presets</h3>
+      <p class="muted small">Tap a note field to see these as one-tap chips. Anything you type by hand is learned automatically and joins the list.</p>
+      <div id="set-presets" class="presets"></div>
+      <div class="row-inline">
+        <input type="text" id="set-preset-new" placeholder="Add a preset…">
+        <button class="btn ghost small" id="set-preset-add" type="button">Add</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Highlight colours</h3>
+      <p class="muted small">Yellow means you can action it now, pink means you're waiting on someone. Rename or add more as you like.</p>
+      <div id="set-colours" class="presets"></div>
+      <button class="btn ghost small" id="set-colour-add" type="button">+ Add a colour</button>
+    </section>
+
+    <section class="group">
+      <h3>Time log</h3>
+      <label>Categories
+        <div class="presets" id="set-cats"></div>
+      </label>
+      <div class="row-inline">
+        <input type="text" id="set-cat-new" placeholder="Add a category…">
+        <button class="btn ghost small" id="set-cat-add" type="button">Add</button>
+      </div>
+      <label style="margin-top:14px">A normal day is
+        <div class="row-inline">
+          <input type="number" id="set-target" min="1" max="24" step="0.25" style="max-width:6rem">
+          <span class="muted">hours</span>
+        </div>
+      </label>
+      <label>Count an entry as “small” at or under
+        <div class="row-inline">
+          <input type="number" id="set-short" min="0.1" max="4" step="0.05" style="max-width:6rem">
+          <span class="muted">hours</span>
+        </div>
+      </label>
+      <label>Quick hours buttons
+        <input type="text" id="set-hours" placeholder="0.25, 0.5, 1, 2">
+      </label>
+    </section>
+
+    <section class="group">
+      <h3>Tender stages</h3>
+      <p class="muted small">The Insights tab works out what stage a task was by looking for these words in what you typed. First match wins, so order matters — “prelim review” counts as a review because Reviews sits above Prelims. Separate words with commas.</p>
+      <label>Break down which category?
+        <select id="set-stagecat"></select>
+      </label>
+      <div id="set-stages"></div>
+      <button class="btn ghost small" id="set-stage-add" type="button">+ Add a stage</button>
+    </section>
+
+    <section class="group">
+      <h3>Overview</h3>
+      <label>Flag items untouched for more than
+        <div class="row-inline">
+          <input type="number" id="set-stale" min="1" max="365" step="1" style="max-width:6rem">
+          <span class="muted">days</span>
+        </div>
+      </label>
+    </section>
+
+    <section class="group">
+      <h3>Account</h3>
+      <p class="muted small" id="set-account"></p>
+      <button class="btn danger small" id="set-signout" type="button">Sign out on this device</button>
+    </section>
+
+    <p class="muted small" id="set-version"></p>
+  </div>
+</dialog>
+
+<!-- Archive -->
+<dialog id="dlg-archive">
+  <form method="dialog" class="dlg-head">
+    <h2>Archive</h2>
+    <button class="iconbtn" value="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </form>
+  <div class="dlg-body">
+    <p class="muted small">Deleted items land here. Restore puts them back at the bottom of the list, ready to drag where you want them. Deleting from here is permanent.</p>
+    <div id="archive-list"></div>
+  </div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="sb.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
