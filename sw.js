@@ -8,7 +8,7 @@
    always go straight to the network so data is never stale.
    ============================================================ */
 
-var CACHE = 'assistant-v1';
+var CACHE = 'assistant-v2';
 
 var SHELL = [
   './',
@@ -69,17 +69,26 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // App shell: cache first, refresh in the background.
+  // App shell: network first, falling back to the cache.
+  //
+  // The other way round (cache first, refresh in the background) loads a
+  // fraction faster but shows you yesterday's version once after every
+  // update, which is baffling when you've just changed something. This way
+  // you always get the current app when you have signal, and the cached one
+  // when you don't. The files are small, so the difference isn't felt.
   if (url.origin === self.location.origin) {
     e.respondWith(
-      caches.match(req).then(function (hit) {
-        var net = fetch(req).then(function (res) {
-          if (res && res.ok) {
-            caches.open(CACHE).then(function (c) { c.put(req, res.clone()); });
-          }
-          return res;
-        }).catch(function () { return hit; });
-        return hit || net;
+      fetch(req).then(function (res) {
+        if (res && res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      }).catch(function () {
+        return caches.match(req).then(function (hit) {
+          // a deep link opened offline still needs the app shell
+          return hit || caches.match('./index.html') || caches.match('./');
+        });
       })
     );
   }
