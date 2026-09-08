@@ -250,17 +250,35 @@ a long holiday, log into the Supabase dashboard and click Restore.
 # Making changes later
 
 Everything is plain HTML, CSS and JavaScript — no build step, no npm, no framework.
-Edit a file, commit it to GitHub, and Pages redeploys in about a minute.
 
-One thing to remember: after changing `app.js`, `styles.css` or `index.html`, also
-bump the version in **`sw.js`**:
+## Uploading: double-click `Upload to GitHub.cmd`
 
-```js
-var CACHE = 'assistant-v1';   // -> 'assistant-v2'
-```
+One time only, install **Git for Windows** from https://git-scm.com/download/win —
+accept every default. On the first run the script connects the folder to your repo
+and GitHub will ask you to sign in once, in your browser.
 
-That's what tells the installed apps to pull the new files instead of using their
-cached copies.
+After that, uploading is: double-click the file, type a short description (or just
+press Enter), done. Pages rebuilds in about a minute.
+
+It uploads **everything that changed**, so a file can't be missed the way `sb.js` was.
+And it refuses to run if it ever sees your task-tracker history or the `Reference`
+folder about to go public — that check runs even if `.gitignore` gets deleted.
+
+If you'd rather have buttons than a console window, **GitHub Desktop**
+(https://desktop.github.com) does the same job with a GUI.
+
+## Knowing whether a device picked up the change
+
+Bump `VERSION` in `config.js` when you make a change, then check the bottom of
+**Settings** on each device. If it still shows the old number, that device is running
+old code — clear its cache (or on the phone: Chrome → Settings → Site settings →
+All sites → the site → Clear & reset).
+
+The installed apps on your phone and PCs always load from the live URL, so a change
+you push to GitHub reaches all three the next time you open them. No reinstalling.
+
+The service worker asks the network first and only falls back to its cached copy when
+you have no signal, so you never get served a stale version while you're online.
 
 ### Trying things out safely
 

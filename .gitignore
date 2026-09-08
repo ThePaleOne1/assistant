@@ -1,0 +1,25 @@
+# ============================================================
+#  Keep private things out of the public repo.
+#
+#  GitHub Pages needs a public repository on the free plan, so
+#  the whole app is readable by anyone who finds it. That's fine
+#  for the code — the key in config.js is meant to be public and
+#  the database rules mean nobody can read your data without your
+#  email and password.
+#
+#  What is NOT fine in public is your actual work: job names,
+#  clients, hours. None of the files below are needed to run the
+#  app, so they stay on your computer.
+# ============================================================
+
+# Your task tracker history — every job name and hour you've logged
+supabase/04_seed_timelog.sql
+Reference/
+
+# Development only. seed-time.js and the tests carry the same history.
+tools/
+
+# Generated previews
+preview.html
+preview-test.html
+preview-debug.html

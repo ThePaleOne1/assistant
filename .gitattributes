@@ -1,0 +1,12 @@
+# Keep line endings stable so Git stops warning about LF/CRLF and files
+# don't show as "changed" just because Windows rewrote the line endings.
+* text=auto eol=lf
+
+# Batch files are the exception — Windows wants CRLF in these.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary, never touch.
+*.png binary
+*.xlsx binary
+*.pdf binary

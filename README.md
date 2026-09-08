@@ -101,6 +101,8 @@ tells you where things stand.
 | `supabase/02_reminders.sql` | The reminder engine. Run once. |
 | `supabase/03_time_log.sql` | The time log table. Run once. |
 | `supabase/04_seed_timelog.sql` | Your task tracker history. Run once, after signing up. |
+| `Upload to GitHub.cmd` | Double-click to publish your changes. Needs Git for Windows. |
+| `.gitignore` | Keeps your real job names and hours out of the public repo. |
 | `Reference/` | The original `Task Tracker.xlsx` the history came from. |
 | `tools/` | Development only — never needs to go on the web. |
 
