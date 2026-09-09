@@ -68,6 +68,7 @@
     learned: {},      // "note text" -> { n: uses, last: iso, colour: key }
     stale_days: 14,
     categories: DEFAULT_CATEGORIES,
+    category_colours: {},                // name -> hex, overrides the built-in colour
     stage_rules: DEFAULT_STAGE_RULES,
     stage_category: 'Tenders',           // which category the stage split applies to
     hours_presets: [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4],

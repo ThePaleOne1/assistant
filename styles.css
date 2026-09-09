@@ -41,19 +41,23 @@
   --tap:     36px;
   --row-h:   34px;
   --pad:     8px;
+  --due-w:   88px;     /* the date column, fixed so notes never shift */
 }
 
 :root[data-size="m"] {
   --fs-xs: 12.5px; --fs-sm: 14px;   --fs-md: 16px;   --fs-lg: 18px;
   --fs-xl: 21px;   --fs-hdr: 14px;  --tap: 40px;     --row-h: 38px;  --pad: 9px;
+  --due-w: 96px;
 }
 :root[data-size="l"] {
   --fs-xs: 14px;   --fs-sm: 15.5px; --fs-md: 18px;   --fs-lg: 21px;
   --fs-xl: 24px;   --fs-hdr: 16px;  --tap: 46px;     --row-h: 44px;  --pad: 11px;
+  --due-w: 108px;
 }
 :root[data-size="xl"] {
   --fs-xs: 15.5px; --fs-sm: 17px;   --fs-md: 20px;   --fs-lg: 23px;
   --fs-xl: 27px;   --fs-hdr: 18px;  --tap: 52px;     --row-h: 50px;  --pad: 13px;
+  --due-w: 118px;
 }
 
 /* Dark tokens live in one place and are applied three ways:
@@ -423,15 +427,24 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .row:hover .note::placeholder, .row .note:focus::placeholder { color: var(--faint); }
 .row .note.hl { color: var(--hl-text); }
 
-/* date chip / alarm */
+/* Date chip. Fixed width on purpose: the note column keeps its left edge at
+   the halfway mark no matter what the chip says, and the dates themselves
+   line up in a column of their own. A longer label eats into its own space,
+   not the note's. */
 .duebtn {
   display: inline-flex; align-items: center; gap: 4px;
-  flex: none;
-  height: 22px; padding: 0 6px;
+  flex: 0 0 var(--due-w);
+  width: var(--due-w);
+  justify-content: flex-start;
+  overflow: hidden;
+  height: calc(var(--fs-xs) + 10px); padding: 0 6px;
   font-size: var(--fs-xs); font-weight: 500; line-height: 1;
   color: var(--faint);
   background: none; border: 0; border-radius: 6px; cursor: pointer;
 }
+.duebtn svg { flex: none; }
+.duebtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duebtn.nodate { justify-content: flex-start; }
 .duebtn svg { width: 13px; height: 13px; stroke-width: 2.1; }
 .duebtn:hover { background: var(--surface-2); color: var(--text); }
 .duebtn.nodate { opacity: .32; }
@@ -708,7 +721,7 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   border-bottom: 1px solid var(--border);
 }
 .sheet-head span { padding: 7px 8px; }
-.sheet-head .c-hrs { text-align: right; }
+.sheet-head .c-hrs { text-align: left; }
 
 .srow { border-bottom: 1px solid var(--border); }
 .srow:last-child { border-bottom: 0; }
@@ -729,7 +742,6 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 }
 .srow select { cursor: pointer; font-size: var(--fs-sm); }
 .srow .c-hrs input {
-  text-align: right;
   font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
 }
@@ -781,6 +793,9 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 .srow .c-hrs input {
   flex: 1 1 auto; min-width: 0;
   border-right: 0;
+  /* left-aligned and tabular, so the finish times read as one straight
+     column instead of drifting with the length of the duration beside them */
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
 .srow .c-hrs input.derived { color: var(--faint); }
@@ -807,7 +822,6 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
-.daystart #row-finish { margin-left: auto; }
 
 /* finish-time quick-pick: the time, with the length it makes */
 #hourspop .chip {
@@ -987,6 +1001,14 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
   .daybar { padding: 12px 8px 8px; }
   .sheet, .rows-wrap { margin-inline: 6px; }
+
+  /* The date column is fixed so notes stay aligned, but on a phone every
+     pixel it takes comes off the name and note. Drop the bell once a date
+     is set — the coloured chip already says there is one — and tighten
+     the column to suit. */
+  :root { --due-w: 74px; }
+  .duebtn.set svg, .duebtn.soon svg, .duebtn.overdue svg { display: none; }
+  .duebtn { padding: 0 4px; }
 }
 
 /* ---------- Overview ---------- */

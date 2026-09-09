@@ -32,13 +32,14 @@
     var sameYear = d.getFullYear() === n.getFullYear();
     return d.getDate() + '/' + (d.getMonth() + 1) + (sameYear ? '' : '/' + String(d.getFullYear()).slice(2));
   }
+  /* Kept short on purpose: the date sits in a fixed-width column so the
+     notes beside it stay aligned, and a long label would only truncate. */
   function dueLabel(s) {
     var n = daysUntil(s);
     if (n === null) return '';
     if (n === 0) return 'Today';
     if (n === 1) return 'Tomorrow';
-    if (n === -1) return '1 day over';
-    if (n < 0) return (-n) + ' days over';
+    if (n < 0) return (-n) + 'd over';
     return fmtDate(s);
   }
   function addDays(n) {
@@ -235,6 +236,7 @@
     paintStatus(Store.status);
     render();
     maybeSeed();
+    healCategories();
     maybeMorningRoutine();
     rememberAppUrl();
     registerSW();
@@ -1321,13 +1323,44 @@
   var CAT_POOL = ['#e8590c', '#0ca678', '#7048e8', '#1098ad', '#d6336c', '#5c940d'];
 
   function catColour(name) {
+    var own = (Store.settings.prefs.category_colours || {})[name];
+    if (own) return own;
     if (CAT_COLOURS[name]) return CAT_COLOURS[name];
     var h = 0;
     for (var i = 0; i < (name || '').length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
     return CAT_POOL[h % CAT_POOL.length];
   }
+  function setCatColour(name, hex) {
+    var p = Store.settings.prefs;
+    p.category_colours = Object.assign({}, p.category_colours || {});
+    p.category_colours[name] = hex;
+    Store.saveSettings({ prefs: p });
+  }
+
   function categories() {
     return (Store.settings.prefs.categories || ['Tenders', 'CEILED', 'Admin', 'Misc']);
+  }
+
+  /* A category removed from Settings by accident shouldn't strand the
+     entries filed under it. Anything still in use is put back in the
+     list, so the dropdown always offers every category your data uses. */
+  function healCategories() {
+    var p = Store.settings.prefs;
+    var list = (p.categories || []).slice();
+    var seen = Object.create(null);
+    list.forEach(function (c) { seen[c] = true; });
+
+    var used = Object.create(null);
+    Store.time.forEach(function (e) {
+      if (e.category && !seen[e.category]) used[e.category] = true;
+    });
+    var missing = Object.keys(used);
+    if (!missing.length) return false;
+
+    p.categories = list.concat(missing);
+    Store.saveSettings({ prefs: p });
+    console.info('[categories] put back in use:', missing.join(', '));
+    return missing;
   }
 
   /* Work out the stage of a task from the words in it. First rule
@@ -1863,26 +1896,6 @@
     moveGrid(id, 'task', 1, true);
   }
 
-  /* Stamp the current time on the last row that hasn't been finished
-     off yet — the button you hit as you get up from the desk. */
-  function finishNow() {
-    var chain = dayChain(timeDay);
-    var target = null;
-    for (var i = chain.length - 1; i >= 0; i--) {
-      if (!chain[i].row.end_time) target = chain[i];
-    }
-    if (!target) {
-      if (!chain.length) return toast('Add a row first.');
-      return toast('Every row already has a finish time.');
-    }
-    var mins = roundClock(nowMinutes());
-    Store.updateTime(target.row.id, { end_time: fmtClock(mins) });
-    recomputeDay(timeDay);
-    renderTime();
-    var c = dayChain(timeDay).filter(function (x) { return x.row.id === target.row.id; })[0];
-    toast('Finished at ' + fmtClock(mins) + (c && c.dur != null ? ' · ' + fmtH(Math.round(c.dur * 100) / 100) + 'h' : ''));
-  }
-
   /* Weekdays open with the morning routine already in place. Once a
      day has been prefilled it is never prefilled again, so deleting
      the row makes it stay gone. */
@@ -2228,7 +2241,6 @@
     $('#day-picker').onchange = function () { if (this.value) gotoDay(this.value); };
     $('#row-add').onclick = function () { addTimeRow(); };
     $('#row-copy').onclick = repeatLastDay;
-    $('#row-finish').onclick = finishNow;
     $('#day-start').onchange = function () {
       var m = parseClock(this.value);
       if (m == null) return;
@@ -2589,23 +2601,61 @@
     $('#set-routine').value = s.prefs.routine_task || '';
     $('#set-routine-mins').value = s.prefs.routine_minutes == null ? 30 : s.prefs.routine_minutes;
 
-    /* time log categories */
+    /* time log categories — colour, order, and how many entries use each */
     var catBox = $('#set-cats'); catBox.innerHTML = '';
+    catBox.style.display = 'block';
+    var counts = Object.create(null);
+    Store.time.forEach(function (e) { counts[e.category] = (counts[e.category] || 0) + 1; });
+
     (s.prefs.categories || []).forEach(function (c, i) {
-      var el = document.createElement('div'); el.className = 'preset-item';
-      var dot = document.createElement('span');
-      dot.className = 'dot'; dot.style.background = catColour(c); dot.style.cursor = 'default';
-      var txt = document.createElement('span'); txt.textContent = c;
-      var x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
+      var row = document.createElement('div');
+      row.className = 'row-inline';
+      row.style.marginBottom = '6px';
+
+      var sw = document.createElement('input');
+      sw.type = 'color';
+      sw.value = catColour(c);
+      sw.title = 'Colour for ' + c;
+      sw.style.cssText = 'width:26px;height:26px;padding:0;border:0;background:none;margin:0;flex:none';
+      sw.onchange = function () { setCatColour(c, sw.value); render(); renderTime(); };
+
+      var nm = document.createElement('span');
+      nm.textContent = c;
+      nm.style.cssText = 'flex:1 1 auto;font-size:var(--fs-sm)';
+
+      var n = document.createElement('span');
+      n.className = 'muted';
+      n.textContent = counts[c] ? counts[c] + ' entries' : 'unused';
+      n.style.cssText = 'font-size:var(--fs-xs);flex:none';
+
+      var up = document.createElement('button');
+      up.className = 'iconbtn'; up.title = 'Move up';
+      up.style.cssText = 'width:26px;height:26px;flex:none';
+      up.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>';
+      up.disabled = i === 0;
+      up.onclick = function () {
+        var a = s.prefs.categories;
+        a.splice(i - 1, 0, a.splice(i, 1)[0]);
+        Store.saveSettings({ prefs: s.prefs });
+        fillSettings(); renderTime();
+      };
+
+      var x = document.createElement('button');
+      x.className = 'x'; x.textContent = '×';
+      x.style.cssText = 'background:none;border:0;color:var(--faint);cursor:pointer;font-size:16px;padding:0 4px;flex:none';
       x.onclick = function () {
-        var used = Store.time.some(function (e) { return e.category === c; });
-        if (used && !confirm('“' + c + '” is used by existing entries. They keep the name, but it disappears from the dropdown. Remove it?')) return;
+        if (counts[c]) {
+          return alert('“' + c + '” is used by ' + counts[c] + ' entries, so it can\'t be removed.\n\n' +
+            'Change those entries to another category first. (Nothing would have been lost either way — ' +
+            'the app puts a category back if your data still uses it.)');
+        }
         s.prefs.categories.splice(i, 1);
         Store.saveSettings({ prefs: s.prefs });
         fillSettings();
       };
-      el.append(dot, txt, x);
-      catBox.appendChild(el);
+
+      row.append(sw, nm, n, up, x);
+      catBox.appendChild(row);
     });
 
     $('#set-target').value = s.prefs.target_hours || 8;
@@ -2615,7 +2665,14 @@
     /* which category gets the stage breakdown */
     var scSel = $('#set-stagecat');
     scSel.innerHTML = '';
-    (s.prefs.categories || []).forEach(function (c) {
+    var scList = (s.prefs.categories || []).slice();
+    /* Keep the saved choice in the list even if the category has been
+       removed, so this select can never quietly end up pointing at a
+       different category than the one your insights are built on. */
+    if (s.prefs.stage_category && scList.indexOf(s.prefs.stage_category) < 0) {
+      scList.push(s.prefs.stage_category);
+    }
+    scList.forEach(function (c) {
       var o = document.createElement('option');
       o.value = c; o.textContent = c;
       if (c === s.prefs.stage_category) o.selected = true;
@@ -2739,7 +2796,8 @@
     stageOf: stageOf, parseH: parseH, fmtH: fmtH, weekStart: weekStart,
     parseClock: parseClock, fmtClock: fmtClock, roundClock: roundClock,
     dayStart: dayStart, dayChain: dayChain, recomputeDay: recomputeDay,
-    finishNow: finishNow, maybeMorningRoutine: maybeMorningRoutine,
+    maybeMorningRoutine: maybeMorningRoutine, healCategories: healCategories,
+    setCatColour: setCatColour,
     readDisplay: readDisplay, writeDisplay: writeDisplay, applyDisplay: applyDisplay,
     debug: function () {
       return {
