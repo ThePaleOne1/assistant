@@ -1427,10 +1427,46 @@
     if (h > 23 || min > 59) return null;
     return h * 60 + min;
   }
+  /* Two formats on purpose. fmtClock is 24-hour and is what gets stored —
+     unambiguous, sorts correctly, and it's what the 307 imported rows and
+     the database already use. fmtClock12 is only ever for display. */
   function fmtClock(mins) {
     if (mins == null) return '';
     mins = ((Math.round(mins) % 1440) + 1440) % 1440;
     return pad(Math.floor(mins / 60)) + ':' + pad(mins % 60);
+  }
+  function fmtClock12(mins) {
+    if (mins == null) return '';
+    mins = ((Math.round(mins) % 1440) + 1440) % 1440;
+    var h = Math.floor(mins / 60), m = mins % 60;
+    var ap = h < 12 ? 'am' : 'pm';
+    h = h % 12; if (h === 0) h = 12;
+    // no space, so the column stays narrow enough on a phone
+    return h + ':' + pad(m) + ap;
+  }
+
+  /* Reading a time you typed. An explicit am or pm is always obeyed. A bare
+     "2:30" during a working day almost certainly means the afternoon, so if
+     the morning reading would land before this row even started, and the
+     afternoon one fits, take the afternoon one. */
+  function parseClockSmart(raw, fromMins) {
+    raw = String(raw == null ? '' : raw).trim();
+    if (!raw) return null;
+
+    var mins = parseClock(raw);
+    // "930" and "1415" are the quickest things to type on a phone
+    if (mins == null && /^\d{3,4}$/.test(raw)) {
+      mins = parseClock(raw.slice(0, raw.length - 2) + ':' + raw.slice(-2));
+    }
+    if (mins == null) return null;
+
+    if (/am|pm/i.test(raw)) return mins;          // you said which; that settles it
+    if (fromMins == null) return mins;
+    if (mins >= fromMins) return mins;            // already makes sense as it stands
+
+    var pm = mins + 720;
+    if (pm < 1440 && pm >= fromMins) return pm;
+    return mins;                                  // leave it wrong and let it flag red
   }
   function roundClock(mins) {
     var step = Store.settings.prefs.round_minutes || 15;
@@ -1639,8 +1675,8 @@
     var hrs = document.createElement('input');
     hrs.type = 'text';
     hrs.inputMode = 'numeric';
-    hrs.value = e.end_time ? fmtClock(parseClock(e.end_time)) : '';
-    hrs.placeholder = chainInfo && chainInfo.derived ? fmtClock(chainInfo.end) : '–';
+    hrs.value = e.end_time ? fmtClock12(parseClock(e.end_time)) : '';
+    hrs.placeholder = chainInfo && chainInfo.derived ? fmtClock12(chainInfo.end) : '–';
     if (chainInfo && chainInfo.derived) hrs.classList.add('derived');
     hrs.dataset.id = e.id; hrs.dataset.field = 'end_time';
     bindTimeEnd(hrs, e.id);
@@ -1749,29 +1785,36 @@
       if (!e) return;
 
       var raw = input.value.trim();
-      var mins = raw ? parseClock(raw) : null;
 
-      // "930" and "1415" are the fastest things to type on a phone
-      if (mins == null && /^\d{3,4}$/.test(raw)) {
-        mins = parseClock(raw.slice(0, raw.length - 2) + ':' + raw.slice(-2));
-      }
+      // where this row starts, so a bare afternoon time reads correctly
+      var chain = dayChain(timeDay);
+      var mine = chain.filter(function (c) { return c.row.id === id; })[0];
+      var from = mine && mine.from != null ? mine.from : dayStart(timeDay);
+
+      var mins = raw ? parseClockSmart(raw, from) : null;
       if (raw && mins == null) {            // couldn't make sense of it
-        input.value = e.end_time ? fmtClock(parseClock(e.end_time)) : '';
+        input.value = e.end_time ? fmtClock12(parseClock(e.end_time)) : '';
         return;
       }
 
-      var val = mins == null ? null : fmtClock(mins);
-      if (val === (e.end_time || null)) return;
+      var val = mins == null ? null : fmtClock(mins);   // stored 24-hour
+      if (val === (e.end_time || null)) {
+        input.value = mins == null ? '' : fmtClock12(mins);
+        return;
+      }
 
       Store.updateTime(id, { end_time: val });
       recomputeDay(timeDay);
       renderTime();
     }
     input.__flush = commit;
-    input.addEventListener('input', function () {
-      input.__dirty = true;
-      clearTimeout(timer); timer = setTimeout(commit, 600);
-    });
+
+    /* No commit-while-typing here, unlike the text fields. This one rewrites
+       what you typed into a tidy "2:30pm", and doing that on a pause would
+       reformat the field mid-entry — type "2", hesitate, and it becomes
+       "2:00pm" before you can add the 30. It commits when you leave the cell
+       or press Enter, which is when you've actually finished. */
+    input.addEventListener('input', function () { input.__dirty = true; });
     input.addEventListener('blur', function () { commit(); closeHoursPop(); });
   }
 
@@ -1869,7 +1912,7 @@
 
     var now = document.createElement('button');
     now.type = 'button'; now.className = 'chip now';
-    now.textContent = 'Now ' + fmtClock(roundClock(nowMinutes()));
+    now.textContent = 'Now ' + fmtClock12(roundClock(nowMinutes()));
     now.onmousedown = function (ev) { ev.preventDefault(); };
     now.onclick = function () { setEnd(anchor, roundClock(nowMinutes()), id); };
     box.appendChild(now);
@@ -1878,7 +1921,7 @@
       var end = from + v * 60;
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'chip';
-      b.innerHTML = fmtClock(end) + '<em>' + fmtH(v) + 'h</em>';
+      b.innerHTML = fmtClock12(end) + '<em>' + fmtH(v) + 'h</em>';
       b.onmousedown = function (ev) { ev.preventDefault(); };
       b.onclick = function () { setEnd(anchor, end, id); };
       box.appendChild(b);
@@ -1889,7 +1932,7 @@
   }
 
   function setEnd(input, mins, id) {
-    input.value = fmtClock(mins);
+    input.value = fmtClock12(mins);
     input.__dirty = true;                   // a deliberate edit, not a stale value
     if (input.__flush) input.__flush();
     closeHoursPop();
@@ -2794,7 +2837,8 @@
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log
     stageOf: stageOf, parseH: parseH, fmtH: fmtH, weekStart: weekStart,
-    parseClock: parseClock, fmtClock: fmtClock, roundClock: roundClock,
+    parseClock: parseClock, parseClockSmart: parseClockSmart,
+    fmtClock: fmtClock, fmtClock12: fmtClock12, roundClock: roundClock,
     dayStart: dayStart, dayChain: dayChain, recomputeDay: recomputeDay,
     maybeMorningRoutine: maybeMorningRoutine, healCategories: healCategories,
     setCatColour: setCatColour,

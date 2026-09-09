@@ -794,9 +794,13 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   flex: 1 1 auto; min-width: 0;
   border-right: 0;
   /* left-aligned and tabular, so the finish times read as one straight
-     column instead of drifting with the length of the duration beside them */
+     column instead of drifting with the length of the duration beside them.
+     A notch smaller than the task text: "12:30pm" is wider than "12:30" was,
+     and that width would otherwise come straight off the task column. */
   text-align: left;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
+  padding-right: 2px;
 }
 .srow .c-hrs input.derived { color: var(--faint); }
 .srow .c-hrs input.derived::placeholder { color: var(--faint); opacity: 1; }
@@ -1001,6 +1005,11 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
   .daybar { padding: 12px 8px 8px; }
   .sheet, .rows-wrap { margin-inline: 6px; }
+
+  /* Category names are short, so the Type column can give room back to the
+     task text, which is the column that actually needs it on a phone. */
+  .sheet-head, .srow { grid-template-columns: 74px 2.6fr minmax(92px, 1fr) var(--tap); }
+  .srow select { padding-left: 6px; padding-right: 2px; }
 
   /* The date column is fixed so notes stay aligned, but on a phone every
      pixel it takes comes off the name and note. Drop the bell once a date

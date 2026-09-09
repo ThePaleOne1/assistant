@@ -28,5 +28,5 @@ window.CONFIG = {
   // Shown at the bottom of Settings. Bump it whenever you push a change,
   // so you can tell at a glance whether a device has picked the change up.
   APP_NAME: 'Assistant',
-  VERSION: '1.3 — category colours, tidier columns'
+  VERSION: '1.4 — am/pm times'
 };
