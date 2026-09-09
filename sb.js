@@ -72,7 +72,15 @@
     stage_category: 'Tenders',           // which category the stage split applies to
     hours_presets: [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4],
     target_hours: 8,                     // a normal day, for the "gaps" insight
-    short_entry: 0.5                     // at or under this counts as a small entry
+    short_entry: 0.5,                    // at or under this counts as a small entry
+
+    /* daily tracker */
+    day_start: '07:30',                  // when a normal day begins
+    day_starts: {},                      // per-day exceptions, pruned after 180 days
+    round_minutes: 15,                   // what "Finished now" snaps to
+    routine_task: 'morning routine - check invoices, update todo list, etc',
+    routine_minutes: 30,
+    routine_last: null                   // last day the routine was prefilled
   };
 
   function defaultSettings() {
@@ -211,6 +219,13 @@
     if (!out.prefs.stage_category) out.prefs.stage_category = 'Tenders';
     if (!out.prefs.target_hours) out.prefs.target_hours = 8;
     if (!out.prefs.short_entry) out.prefs.short_entry = 0.5;
+    if (!out.prefs.day_start) out.prefs.day_start = '07:30';
+    if (!out.prefs.day_starts || typeof out.prefs.day_starts !== 'object') out.prefs.day_starts = {};
+    if (!out.prefs.round_minutes) out.prefs.round_minutes = 15;
+    if (out.prefs.routine_task === undefined) {
+      out.prefs.routine_task = 'morning routine - check invoices, update todo list, etc';
+    }
+    if (out.prefs.routine_minutes == null) out.prefs.routine_minutes = 30;
     return out;
   }
 
@@ -647,6 +662,7 @@
         category: 'Misc',
         task: '',
         hours: null,
+        end_time: null,
         position: 1000,
         note: null,
         created_at: nowIso(),

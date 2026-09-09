@@ -13,6 +13,26 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
+<script>
+/* Theme and text size are per device, not synced — the phone wants big
+   text and the 27" monitor doesn't. Applied here, before the stylesheet
+   paints, so there's no flash of the wrong theme on load. */
+(function () {
+  try {
+    var d = JSON.parse(localStorage.getItem('assist:display') || '{}');
+    var theme = d.theme || 'auto';
+    if (theme !== 'auto') document.documentElement.dataset.theme = theme;
+    var size = d.size;
+    if (!size) {
+      // phones and tablets start Large; desktops start Normal
+      size = window.matchMedia('(max-width: 680px), (pointer: coarse)').matches ? 'l' : 'm';
+    }
+    document.documentElement.dataset.size = size;
+  } catch (e) {
+    document.documentElement.dataset.size = 'm';
+  }
+})();
+</script>
 </head>
 <body>
 
@@ -60,6 +80,9 @@
       <button class="pill" id="sync-pill" type="button" title="Sync status">•</button>
     </div>
     <div class="appbar-actions">
+      <button class="iconbtn" id="btn-theme" title="Light / dark" aria-label="Light or dark">
+        <svg viewBox="0 0 24 24" id="icon-theme"></svg>
+      </button>
       <button class="iconbtn" id="btn-search" title="Search (Ctrl+F)" aria-label="Search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       </button>
@@ -81,7 +104,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="todo" role="tab">Todo</button>
-    <button class="tab" data-tab="time" role="tab">Time</button>
+    <button class="tab" data-tab="time" role="tab">Daily Tracker</button>
     <button class="tab" data-tab="overview" role="tab">Overview</button>
   </nav>
 
@@ -122,13 +145,19 @@
           <button class="btn ghost small" id="day-today">Today</button>
         </div>
 
+        <div class="daystart">
+          <span>Day starts</span>
+          <input type="time" id="day-start" step="300" aria-label="What time the day started">
+          <button class="btn small" id="row-finish" title="Stamp the current time on the last unfinished row">Finished now</button>
+        </div>
+
         <div class="daysum" id="day-summary"></div>
 
         <div class="sheet" id="sheet">
           <div class="sheet-head">
             <span class="c-cat">Type</span>
             <span class="c-task">Task</span>
-            <span class="c-hrs">Hours</span>
+            <span class="c-hrs">Finished</span>
             <span class="c-del"></span>
           </div>
           <div id="sheet-body"></div>
@@ -238,6 +267,41 @@
       <p class="muted small">Yellow means you can action it now, pink means you're waiting on someone. Rename or add more as you like.</p>
       <div id="set-colours" class="presets"></div>
       <button class="btn ghost small" id="set-colour-add" type="button">+ Add a colour</button>
+    </section>
+
+    <section class="group">
+      <h3>This device</h3>
+      <p class="muted small">Text size and theme are kept on this device only, so your phone can be large and dark while a monitor stays normal and light.</p>
+      <label>Text size
+        <div class="seg" id="set-size" style="margin:6px 0 0"></div>
+      </label>
+      <label>Theme
+        <div class="seg" id="set-theme" style="margin:6px 0 0"></div>
+      </label>
+    </section>
+
+    <section class="group">
+      <h3>Daily tracker</h3>
+      <label>A normal day starts at
+        <input type="time" id="set-daystart" step="300" style="max-width:9rem">
+      </label>
+      <label>Round times to the nearest
+        <select id="set-round">
+          <option value="1">1 minute</option>
+          <option value="5">5 minutes</option>
+          <option value="10">10 minutes</option>
+          <option value="15">15 minutes</option>
+        </select>
+      </label>
+      <label>Start each weekday with
+        <input type="text" id="set-routine" placeholder="Leave empty for none">
+      </label>
+      <label>lasting
+        <div class="row-inline">
+          <input type="number" id="set-routine-mins" min="0" max="480" step="5" style="max-width:6rem">
+          <span class="muted">minutes</span>
+        </div>
+      </label>
     </section>
 
     <section class="group">

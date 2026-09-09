@@ -88,6 +88,65 @@
     return 'none';
   }
 
+  /* ============================================================
+     Display settings — theme and text size.
+     Kept on this device, never synced: the phone wants large text
+     and the desktop doesn't, and one shouldn't drag the other.
+     ============================================================ */
+  var DISPLAY_KEY = 'assist:display';
+  var SIZES = [['s', 'Small'], ['m', 'Normal'], ['l', 'Large'], ['xl', 'Extra large']];
+  var THEMES = [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']];
+
+  function readDisplay() {
+    var d = {};
+    try { d = JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') || {}; } catch (e) {}
+    if (!d.theme) d.theme = 'auto';
+    if (!d.size) {
+      d.size = window.matchMedia('(max-width: 680px), (pointer: coarse)').matches ? 'l' : 'm';
+    }
+    return d;
+  }
+  function writeDisplay(patch) {
+    var d = Object.assign(readDisplay(), patch);
+    try { localStorage.setItem(DISPLAY_KEY, JSON.stringify(d)); } catch (e) {}
+    applyDisplay();
+    return d;
+  }
+  function applyDisplay() {
+    var d = readDisplay();
+    var r = document.documentElement;
+    if (d.theme === 'auto') delete r.dataset.theme; else r.dataset.theme = d.theme;
+    r.dataset.size = d.size;
+    paintThemeIcon();
+    // keep the phone's status bar in step with the theme
+    var dark = d.theme === 'dark' ||
+      (d.theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    $$('meta[name=theme-color]').forEach(function (m) { m.remove(); });
+    var meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    meta.content = dark ? '#111216' : '#f4f4f6';
+    document.head.appendChild(meta);
+  }
+
+  var SUN = '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M4.4 4.4l1.7 1.7M17.9 17.9l1.7 1.7M2.6 12h2.4M19 12h2.4M4.4 19.6l1.7-1.7M17.9 6.1l1.7-1.7"/>';
+  var MOON = '<path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.3 8.3 0 1 0 20 14.5z"/>';
+  var AUTO = '<circle cx="12" cy="12" r="8.2"/><path d="M12 3.8v16.4a8.2 8.2 0 0 0 0-16.4z" fill="currentColor" stroke="none"/>';
+
+  function paintThemeIcon() {
+    var el = $('#icon-theme');
+    if (!el) return;
+    var t = readDisplay().theme;
+    el.innerHTML = t === 'light' ? SUN : t === 'dark' ? MOON : AUTO;
+    var b = $('#btn-theme');
+    if (b) b.title = 'Theme: ' + (t === 'auto' ? 'follows your device' : t);
+  }
+
+  try {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+      if (readDisplay().theme === 'auto') applyDisplay();
+    });
+  } catch (e) {}
+
   /* ---------- toast ---------- */
   var toastTimer = null;
   function toast(msg, actionLabel, action, ms) {
@@ -169,12 +228,14 @@
     Store.on('settings', scheduleRender);
     Store.on('status', paintStatus);
 
+    applyDisplay();
     wireChrome();
     wireTime();
     installDrag();
     paintStatus(Store.status);
     render();
     maybeSeed();
+    maybeMorningRoutine();
     rememberAppUrl();
     registerSW();
   }
@@ -273,20 +334,44 @@
   /* ============================================================
      Render
      ============================================================ */
+  /* Redrawing is held off only while there are keystrokes that haven't been
+     saved yet. Merely having the cursor resting in a field is not enough:
+     render() puts focus and the caret back where they were, and blocking on
+     focus alone means an edit from your phone never appears while a box on
+     this device happens to be selected. */
   function isEditingInList() {
     var a = document.activeElement;
-    return !!(a && a.closest && a.closest('#list, #sheet') &&
-              (a.tagName === 'INPUT' || a.tagName === 'SELECT'));
+    if (!a || !a.closest || !a.closest('#list, #sheet')) return false;
+    if (a.tagName !== 'INPUT' && a.tagName !== 'SELECT') return false;
+    return !!a.__dirty;
   }
 
   /* Rebuilding the list while a finger or mouse button is down destroys the
      element being pressed, so the browser never delivers the click. Defer
      until the interaction is over, then catch up. */
-  var pointerDown = false;
+  var pointerDown = false, pointerDownAt = 0;
   var flushTimer = null;
 
+  /* A pointerup can go missing — released outside the window, swallowed by
+     the OS, or simply never delivered. If "a finger is down" could latch on
+     forever the list would quietly stop redrawing, so it expires. */
+  function pointerIsDown() {
+    return pointerDown && (Date.now() - pointerDownAt) < 1500;
+  }
+
+  function busy() {
+    return isEditingInList() || dragging || pointerIsDown() || rendering;
+  }
+
   function scheduleRender() {
-    if (isEditingInList() || dragging || pointerDown || rendering) { pendingRender = true; return; }
+    if (busy()) {
+      pendingRender = true;
+      /* Arm a retry. Without one, a redraw deferred mid-keystroke only ever
+         resumed if a click happened to come along afterwards — so a change
+         arriving from another device could sit unseen indefinitely. */
+      if (!flushTimer) flushTimer = setTimeout(flushRender, 250);
+      return;
+    }
     render();
   }
 
@@ -294,19 +379,28 @@
     clearTimeout(flushTimer);
     flushTimer = null;
     if (!pendingRender) return;
-    if (isEditingInList() || dragging || pointerDown || rendering) return;
+    if (busy()) {
+      // check back once the reason has had time to clear
+      flushTimer = setTimeout(flushRender, 300);
+      return;
+    }
     render();
   }
 
-  document.addEventListener('pointerdown', function () { pointerDown = true; }, true);
+  function startPointer() { pointerDown = true; pointerDownAt = Date.now(); }
   function endPointer() {
     pointerDown = false;
     // after the click has been delivered, not before
     clearTimeout(flushTimer);
     flushTimer = setTimeout(flushRender, 120);
   }
+  document.addEventListener('pointerdown', startPointer, true);
   document.addEventListener('pointerup', endPointer, true);
   document.addEventListener('pointercancel', endPointer, true);
+  // also on window: an event dispatched at the window never reaches a
+  // listener bound to the document
+  window.addEventListener('pointerup', endPointer, true);
+  window.addEventListener('pointercancel', endPointer, true);
   // bubble phase: the target's own handler has already run by now
   document.addEventListener('click', function () { flushRender(); }, false);
   window.addEventListener('blur', function () { pointerDown = false; });
@@ -333,7 +427,9 @@
     try { renderInner(); } finally { rendering = false; }
   }
 
+  var renderCount = 0;
   function renderInner() {
+    renderCount++;
     // commit anything still sitting in a debounce, so the rebuilt rows
     // show what was actually typed rather than the last saved value
     flushAllText();
@@ -484,6 +580,21 @@
       if (e.key === 'Enter') { e.preventDefault(); closeNotePop(); addTaskAfter(t); }
       if (e.key === 'Escape') { closeNotePop(); note.blur(); }
     });
+    /* A row created with Enter and then abandoned shouldn't stay. Once
+       focus leaves the row entirely, if there's nothing in it at all,
+       drop it — quietly, since it never really existed. */
+    function dropIfBlank() {
+      setTimeout(function () {
+        if (el.contains(document.activeElement)) return;
+        var cur = Store.byId(t.id);
+        if (!cur || cur.archived_at) return;
+        if ((cur.name || '').trim() || (cur.note || '').trim() || cur.due_date) return;
+        Store.hardDelete(cur.id);
+      }, 60);
+    }
+    name.addEventListener('blur', dropIfBlank);
+    note.addEventListener('blur', dropIfBlank);
+
     note.addEventListener('blur', function () {
       // only remember notes you actually typed, so tabbing past one
       // doesn't inflate it up the chip list
@@ -1258,6 +1369,104 @@
     return isFinite(n) && n >= 0 ? n : null;
   }
 
+  /* ============================================================
+     End times
+     ------------------------------------------------------------
+     You type when a task finished; the duration is the gap since
+     the previous row finished (or since the day started).
+
+     Rows imported from the spreadsheet have hours but no finish
+     time. Those still work: the chain walks through them on their
+     stored hours, and the app shows their implied finish time in
+     grey without storing it. So a day of old rows still reads top
+     to bottom, and nothing invented gets written to your history.
+     ============================================================ */
+
+  function parseClock(s) {
+    if (s == null) return null;
+    s = String(s).trim();
+    if (!s) return null;
+    var m = s.match(/^(\d{1,2})\s*[:.]?\s*(\d{2})?\s*(am|pm)?$/i);
+    if (!m) return null;
+    var h = +m[1], min = m[2] ? +m[2] : 0, ap = (m[3] || '').toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    if (h > 23 || min > 59) return null;
+    return h * 60 + min;
+  }
+  function fmtClock(mins) {
+    if (mins == null) return '';
+    mins = ((Math.round(mins) % 1440) + 1440) % 1440;
+    return pad(Math.floor(mins / 60)) + ':' + pad(mins % 60);
+  }
+  function roundClock(mins) {
+    var step = Store.settings.prefs.round_minutes || 15;
+    return Math.round(mins / step) * step;
+  }
+  function nowMinutes() {
+    var d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  }
+
+  /* What time does this day begin? A global default, with a per-day
+     override for the mornings that didn't go to plan. */
+  function dayStart(dateStr) {
+    var over = (Store.settings.prefs.day_starts || {})[dateStr];
+    return parseClock(over || Store.settings.prefs.day_start || '07:30') || 450;
+  }
+  function setDayStart(dateStr, mins) {
+    var p = Store.settings.prefs;
+    var starts = Object.assign({}, p.day_starts || {});
+    if (fmtClock(mins) === (p.day_start || '07:30')) delete starts[dateStr];
+    else starts[dateStr] = fmtClock(mins);
+    // don't let the exceptions list grow forever
+    var cut = addDays(-180);
+    Object.keys(starts).forEach(function (k) { if (k < cut) delete starts[k]; });
+    p.day_starts = starts;
+    Store.saveSettings({ prefs: p });
+  }
+
+  /* Walk a day in order, working out where each row ends and how
+     long it took. Returns one entry per row; nothing is written. */
+  function dayChain(dateStr) {
+    var rows = dayEntries(dateStr);
+    var at = dayStart(dateStr);
+    return rows.map(function (e) {
+      var end = parseClock(e.end_time);
+      var from = at;
+      var out;
+      if (end != null) {
+        /* A finish time earlier than the one above it is a typo, not a
+           task that ran until the small hours. Treating it as a wrap
+           would turn "8:00 after a 9:00 start" into a 23-hour day, so
+           it counts as nothing and gets flagged red instead. */
+        var mins = end - at;
+        var bad = mins < 0;
+        out = { row: e, from: from, end: end, dur: bad ? 0 : mins / 60, derived: false, bad: bad };
+        at = end;
+      } else if (e.hours != null) {
+        // a row from the spreadsheet: believe its hours, imply the finish
+        at += Number(e.hours) * 60;
+        out = { row: e, from: from, end: at, dur: Number(e.hours), derived: true, bad: false };
+      } else {
+        out = { row: e, from: from, end: null, dur: null, derived: false, bad: false };
+      }
+      return out;
+    });
+  }
+
+  /* Persist the durations the chain implies, for any row whose stored
+     hours no longer match. Only rows with a real end time are touched,
+     so imported history is never rewritten. */
+  function recomputeDay(dateStr) {
+    dayChain(dateStr).forEach(function (c) {
+      if (c.derived || c.dur == null) return;
+      var want = Math.round(c.dur * 100) / 100;
+      var have = c.row.hours == null ? null : Number(c.row.hours);
+      if (have !== want) Store.updateTime(c.row.id, { hours: want });
+    });
+  }
+
   function shiftDay(dateStr, n) {
     var d = parseDate(dateStr);
     d.setDate(d.getDate() + n);
@@ -1283,7 +1492,8 @@
 
   /* ---------- render ---------- */
   function renderTime() {
-    if (!$('#view-time').classList.contains('active')) return;
+    var view = $('#view-time');
+    if (!view || !view.classList.contains('active')) return;
     renderDayBar();
     renderSheet();
     buildTaskHistory();
@@ -1294,6 +1504,8 @@
     var picker = $('#day-picker');
     if (document.activeElement !== picker) picker.value = timeDay;
     $('#day-today').hidden = (timeDay === todayStr());
+    var ds = $('#day-start');
+    if (ds && document.activeElement !== ds) ds.value = fmtClock(dayStart(timeDay));
 
     // where the day went
     var rows = dayEntries(timeDay);
@@ -1325,16 +1537,16 @@
   function renderSheet() {
     var body = $('#sheet-body');
     var focus = captureFocus();
-    var rows = dayEntries(timeDay);
+    var chain = dayChain(timeDay);
 
     body.innerHTML = '';
-    if (!rows.length) {
+    if (!chain.length) {
       var e = document.createElement('div');
       e.className = 'sheet-empty';
       e.textContent = 'Nothing logged yet. Add a row, or repeat your last day.';
       body.appendChild(e);
     } else {
-      rows.forEach(function (r) { body.appendChild(srowEl(r)); });
+      chain.forEach(function (c) { body.appendChild(srowEl(c)); });
     }
 
     var total = dayTotal(timeDay);
@@ -1346,7 +1558,8 @@
     restoreFocus(focus);
   }
 
-  function srowEl(e) {
+  function srowEl(chainInfo) {
+    var e = chainInfo.row;
     var row = document.createElement('div');
     row.className = 'srow' + (e.note ? ' estimated' : '');
     row.dataset.time = e.id;
@@ -1386,19 +1599,26 @@
     bindTimeText(task, e.id, 'task');
     taskWrap.appendChild(task);
 
-    /* hours — text, not number, so the arrow keys can move between
-       rows instead of nudging the value */
+    /* finish time — text, not a time input, so the arrow keys move
+       between rows and you can type "930" as well as "9:30" */
     var hrsWrap = document.createElement('div');
     hrsWrap.className = 'c-hrs';
     var hrs = document.createElement('input');
     hrs.type = 'text';
-    hrs.inputMode = 'decimal';
-    hrs.value = e.hours == null ? '' : fmtH(Number(e.hours));
-    hrs.placeholder = '–';
-    hrs.dataset.id = e.id; hrs.dataset.field = 'hours';
-    bindTimeHours(hrs, e.id);
+    hrs.inputMode = 'numeric';
+    hrs.value = e.end_time ? fmtClock(parseClock(e.end_time)) : '';
+    hrs.placeholder = chainInfo && chainInfo.derived ? fmtClock(chainInfo.end) : '–';
+    if (chainInfo && chainInfo.derived) hrs.classList.add('derived');
+    hrs.dataset.id = e.id; hrs.dataset.field = 'end_time';
+    bindTimeEnd(hrs, e.id);
     hrs.addEventListener('focus', function () { openHoursPop(e.id, hrs); });
-    hrsWrap.appendChild(hrs);
+
+    var dur = document.createElement('span');
+    dur.className = 'dur' + (chainInfo && chainInfo.bad ? ' bad' : '');
+    dur.textContent = (chainInfo && chainInfo.dur != null) ? fmtH(Math.round(chainInfo.dur * 100) / 100) + 'h' : '';
+    if (chainInfo && chainInfo.bad) dur.title = 'That finish time is before the one above it.';
+
+    hrsWrap.append(hrs, dur);
 
     /* delete */
     var delWrap = document.createElement('div');
@@ -1484,7 +1704,9 @@
     input.addEventListener('blur', commit);
   }
 
-  function bindTimeHours(input, id) {
+  /* The finish-time cell. Accepts 9:30, 930, 9.30, or 9 — whatever
+     is quickest to type — and rewrites it tidily once committed. */
+  function bindTimeEnd(input, id) {
     var timer = null;
     function commit() {
       clearTimeout(timer); timer = null;
@@ -1492,21 +1714,30 @@
       input.__dirty = false;
       var e = Store.timeById(id);
       if (!e) return;
-      var v = parseH(input.value);
-      var cur = e.hours == null ? null : Number(e.hours);
-      if (v === cur) return;
-      Store.updateTime(id, { hours: v });
-      input.value = v == null ? '' : fmtH(v);
-      renderDayBar();
-      var total = dayTotal(timeDay);
-      var tEl = $('#sheet-total');
-      tEl.innerHTML = 'Total <b>' + fmtH(total) + 'h</b>';
-      tEl.classList.toggle('over', total > (Store.settings.prefs.target_hours || 8) + 0.01);
+
+      var raw = input.value.trim();
+      var mins = raw ? parseClock(raw) : null;
+
+      // "930" and "1415" are the fastest things to type on a phone
+      if (mins == null && /^\d{3,4}$/.test(raw)) {
+        mins = parseClock(raw.slice(0, raw.length - 2) + ':' + raw.slice(-2));
+      }
+      if (raw && mins == null) {            // couldn't make sense of it
+        input.value = e.end_time ? fmtClock(parseClock(e.end_time)) : '';
+        return;
+      }
+
+      var val = mins == null ? null : fmtClock(mins);
+      if (val === (e.end_time || null)) return;
+
+      Store.updateTime(id, { end_time: val });
+      recomputeDay(timeDay);
+      renderTime();
     }
     input.__flush = commit;
     input.addEventListener('input', function () {
       input.__dirty = true;
-      clearTimeout(timer); timer = setTimeout(commit, 400);
+      clearTimeout(timer); timer = setTimeout(commit, 600);
     });
     input.addEventListener('blur', function () { commit(); closeHoursPop(); });
   }
@@ -1520,6 +1751,7 @@
       category: last ? last.category : (categories()[0] || 'Tenders'),
       position: last ? last.position + 1024 : 1024
     });
+    recomputeDay(timeDay);
     renderTime();
     if (focusIt !== false) focusCell(e.id, 'task');
     return e;
@@ -1551,7 +1783,8 @@
     var rows = dayEntries(timeDay);
     var p = rows.length ? rows[rows.length - 1].position + 1024 : 1024;
     src.forEach(function (e) {
-      Store.newTime({ work_date: timeDay, category: e.category, task: e.task, hours: null, position: p });
+      Store.newTime({ work_date: timeDay, category: e.category, task: e.task,
+                      hours: null, end_time: null, position: p });
       p += 1024;
     });
     renderTime();
@@ -1585,28 +1818,100 @@
   }
 
   /* ---------- hours quick-pick ---------- */
+  /* Rather than a list of durations, offer finish times: the moment
+     this row started plus each common length, so one tap still means
+     "that took 45 minutes" without any arithmetic. */
   var hoursPopFor = null;
   function openHoursPop(id, anchor) {
     hoursPopFor = { id: id, input: anchor };
     var pop = $('#hourspop'), box = $('#hourspop-chips');
     box.innerHTML = '';
+
+    /* Measure from where this row actually starts, which is the running
+       clock through the day — not the row above's own finish time. Those
+       differ whenever a row above has no finish time recorded. */
+    var chain = dayChain(timeDay);
+    var i = chain.findIndex(function (c) { return c.row.id === id; });
+    var from = (i >= 0 && chain[i].from != null) ? chain[i].from : dayStart(timeDay);
+
+    var now = document.createElement('button');
+    now.type = 'button'; now.className = 'chip now';
+    now.textContent = 'Now ' + fmtClock(roundClock(nowMinutes()));
+    now.onmousedown = function (ev) { ev.preventDefault(); };
+    now.onclick = function () { setEnd(anchor, roundClock(nowMinutes()), id); };
+    box.appendChild(now);
+
     (Store.settings.prefs.hours_presets || []).forEach(function (v) {
+      var end = from + v * 60;
       var b = document.createElement('button');
-      b.type = 'button'; b.className = 'chip'; b.textContent = fmtH(v);
+      b.type = 'button'; b.className = 'chip';
+      b.innerHTML = fmtClock(end) + '<em>' + fmtH(v) + 'h</em>';
       b.onmousedown = function (ev) { ev.preventDefault(); };
-      b.onclick = function () {
-        anchor.value = fmtH(v);
-        anchor.__dirty = true;              // this one really is a deliberate edit
-        if (anchor.__flush) anchor.__flush();
-        closeHoursPop();
-        moveGrid(id, 'task', 1, true);
-      };
+      b.onclick = function () { setEnd(anchor, end, id); };
       box.appendChild(b);
     });
+
     pop.hidden = false;
     positionPop(pop, anchor);
   }
-  function closeHoursPop() { $('#hourspop').hidden = true; hoursPopFor = null; }
+
+  function setEnd(input, mins, id) {
+    input.value = fmtClock(mins);
+    input.__dirty = true;                   // a deliberate edit, not a stale value
+    if (input.__flush) input.__flush();
+    closeHoursPop();
+    moveGrid(id, 'task', 1, true);
+  }
+
+  /* Stamp the current time on the last row that hasn't been finished
+     off yet — the button you hit as you get up from the desk. */
+  function finishNow() {
+    var chain = dayChain(timeDay);
+    var target = null;
+    for (var i = chain.length - 1; i >= 0; i--) {
+      if (!chain[i].row.end_time) target = chain[i];
+    }
+    if (!target) {
+      if (!chain.length) return toast('Add a row first.');
+      return toast('Every row already has a finish time.');
+    }
+    var mins = roundClock(nowMinutes());
+    Store.updateTime(target.row.id, { end_time: fmtClock(mins) });
+    recomputeDay(timeDay);
+    renderTime();
+    var c = dayChain(timeDay).filter(function (x) { return x.row.id === target.row.id; })[0];
+    toast('Finished at ' + fmtClock(mins) + (c && c.dur != null ? ' · ' + fmtH(Math.round(c.dur * 100) / 100) + 'h' : ''));
+  }
+
+  /* Weekdays open with the morning routine already in place. Once a
+     day has been prefilled it is never prefilled again, so deleting
+     the row makes it stay gone. */
+  function maybeMorningRoutine() {
+    var p = Store.settings.prefs;
+    var text = p.routine_task;
+    if (text === undefined) text = 'morning routine - check invoices, update todo list, etc';
+    if (!text) return;
+    if (timeDay !== todayStr()) return;          // only ever today
+    if (!isWeekday(timeDay)) return;
+    if (p.routine_last === timeDay) return;
+    if (dayEntries(timeDay).length) {
+      p.routine_last = timeDay;
+      Store.saveSettings({ prefs: p });
+      return;
+    }
+    var mins = p.routine_minutes == null ? 30 : p.routine_minutes;
+    Store.newTime({
+      work_date: timeDay,
+      category: 'Admin',
+      task: text,
+      end_time: fmtClock(dayStart(timeDay) + mins),
+      hours: Math.round((mins / 60) * 100) / 100,
+      position: 1024
+    });
+    p.routine_last = timeDay;
+    Store.saveSettings({ prefs: p });
+  }
+  function closeHoursPop() { var p = $('#hourspop'); if (p) p.hidden = true; hoursPopFor = null; }
 
   /* ============================================================
      Insights
@@ -1923,6 +2228,14 @@
     $('#day-picker').onchange = function () { if (this.value) gotoDay(this.value); };
     $('#row-add').onclick = function () { addTimeRow(); };
     $('#row-copy').onclick = repeatLastDay;
+    $('#row-finish').onclick = finishNow;
+    $('#day-start').onchange = function () {
+      var m = parseClock(this.value);
+      if (m == null) return;
+      setDayStart(timeDay, m);
+      recomputeDay(timeDay);
+      renderTime();
+    };
 
     $$('.seg-btn').forEach(function (b) {
       b.onclick = function () {
@@ -1936,6 +2249,7 @@
   function gotoDay(d) {
     timeDay = d;
     closeHoursPop();
+    maybeMorningRoutine();
     renderTime();
   }
 
@@ -2049,6 +2363,50 @@
       Store.saveSettings({ prefs: Store.settings.prefs });
       fillSettings();
     };
+
+    /* --- this device: text size and theme --- */
+    function segButtons(box, opts, current, onPick) {
+      box.innerHTML = '';
+      opts.forEach(function (o) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'seg-btn' + (o[0] === current ? ' active' : '');
+        b.textContent = o[1];
+        b.onclick = function () { onPick(o[0]); };
+        box.appendChild(b);
+      });
+    }
+    $('#btn-theme').onclick = function () {
+      var order = ['auto', 'light', 'dark'];
+      var next = order[(order.indexOf(readDisplay().theme) + 1) % order.length];
+      writeDisplay({ theme: next });
+      if ($('#dlg-settings').open) fillSettings();
+      toast('Theme: ' + (next === 'auto' ? 'follows your device' : next));
+    };
+
+    /* --- daily tracker --- */
+    $('#set-daystart').onchange = function () {
+      var m = parseClock(this.value);
+      if (m == null) return;
+      Store.settings.prefs.day_start = fmtClock(m);
+      Store.saveSettings({ prefs: Store.settings.prefs });
+      renderTime();
+    };
+    $('#set-round').onchange = function () {
+      Store.settings.prefs.round_minutes = parseInt(this.value, 10) || 15;
+      Store.saveSettings({ prefs: Store.settings.prefs });
+    };
+    $('#set-routine').onchange = function () {
+      Store.settings.prefs.routine_task = this.value.trim();
+      Store.saveSettings({ prefs: Store.settings.prefs });
+    };
+    $('#set-routine-mins').onchange = function () {
+      var v = Math.max(0, Math.min(480, parseInt(this.value, 10) || 30));
+      Store.settings.prefs.routine_minutes = v;
+      Store.saveSettings({ prefs: Store.settings.prefs });
+    };
+
+    wireSettings.segButtons = segButtons;
 
     /* --- time log --- */
     $('#set-cat-add').onclick = function () {
@@ -2211,6 +2569,26 @@
       cbox.appendChild(el);
     });
 
+    /* this device: text size + theme */
+    var d = readDisplay();
+    if (wireSettings.segButtons) {
+      wireSettings.segButtons($('#set-size'), SIZES, d.size, function (v) {
+        writeDisplay({ size: v });
+        fillSettings();
+        render(); renderTime();
+      });
+      wireSettings.segButtons($('#set-theme'), THEMES, d.theme, function (v) {
+        writeDisplay({ theme: v });
+        fillSettings();
+      });
+    }
+
+    /* daily tracker */
+    $('#set-daystart').value = s.prefs.day_start || '07:30';
+    $('#set-round').value = String(s.prefs.round_minutes || 15);
+    $('#set-routine').value = s.prefs.routine_task || '';
+    $('#set-routine-mins').value = s.prefs.routine_minutes == null ? 30 : s.prefs.routine_minutes;
+
     /* time log categories */
     var catBox = $('#set-cats'); catBox.innerHTML = '';
     (s.prefs.categories || []).forEach(function (c, i) {
@@ -2359,6 +2737,21 @@
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log
     stageOf: stageOf, parseH: parseH, fmtH: fmtH, weekStart: weekStart,
+    parseClock: parseClock, fmtClock: fmtClock, roundClock: roundClock,
+    dayStart: dayStart, dayChain: dayChain, recomputeDay: recomputeDay,
+    finishNow: finishNow, maybeMorningRoutine: maybeMorningRoutine,
+    readDisplay: readDisplay, writeDisplay: writeDisplay, applyDisplay: applyDisplay,
+    debug: function () {
+      return {
+        renders: renderCount, pendingRender: pendingRender, rendering: rendering,
+        dragging: !!dragging, pointerDown: pointerDown, pointerIsDown: pointerIsDown(),
+        editing: isEditingInList(),
+        active: document.activeElement
+          ? document.activeElement.tagName + '.' + document.activeElement.className +
+            (document.activeElement.__dirty ? ' DIRTY' : '')
+          : 'none'
+      };
+    },
     shiftDay: shiftDay, dayLabel: dayLabel, dayEntries: dayEntries, dayTotal: dayTotal,
     catColour: catColour, isWeekday: isWeekday, todayStr: todayStr,
     renderTime: renderTime, renderInsights: renderInsights,

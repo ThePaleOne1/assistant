@@ -28,18 +28,31 @@ pings the phone when something is due. Runs entirely on free services.
 - **Delete** with the × or a left swipe on the phone. Ten seconds to undo, then
   it sits in the Archive until you delete it from there for good.
 
-**The Time tab**
+**The Daily Tracker tab**
 
 A day at a time, laid out like the spreadsheet it replaces: **Type**, **Task**,
-**Hours**, one row per thing you did.
+**Finished**, one row per thing you did.
+
+You type **when a task finished**, not how long it took — the duration is the gap
+since the row above finished, counting from the day's start (7:30 by default, and
+editable per day at the top of the grid). Each row shows the time you typed with the
+length it works out to beside it in grey.
+
+- **Finished now** stamps the current time on the first row that hasn't got one,
+  rounded to the nearest quarter hour. That's the button you hit as you get up.
+- Tapping the **Finished** cell offers finish times rather than durations — "10:15
+  (0.5h)" — so one tap still means "that took half an hour".
+- Weekdays open with your **morning routine** already in, ending 30 minutes after
+  the start. Delete it and it stays gone for that day.
+- The 307 rows imported from the spreadsheet only recorded durations, so they show a
+  **greyed-out implied finish time**. Nothing invented is written to your history.
 
 - Arrows to move between days, a date picker, and a **Today** button.
 - **Tab** across, **Enter** down — Enter on the last row makes a new one. Arrow
   keys move between rows in the same column, like a spreadsheet.
 - The **task field autocompletes** from everything you've ever typed, so
   "morning routine — check invoices, update todo list, etc" is three keystrokes.
-- Tapping **Hours** offers 0.25 / 0.5 / 0.75 / 1 / 1.5 / 2 / 3 / 4 as buttons, then
-  drops you into the next row. It also accepts `1:30` if you'd rather.
+- Type `9:30`, `930` or `9.30` — whichever is quickest.
 - **Repeat last day** copies yesterday's rows across with the hours blank.
 - A coloured bar at the top shows where the day went, and a running day total that
   turns amber past 8 hours.
@@ -59,6 +72,15 @@ Second half of the Time tab, over 2 weeks / 30 days / 90 days / all time:
   weekdays are blank, and how many entries are missing hours.
 - **The small stuff** — how much of the week disappears into half-hour chunks, and
   how many separate things you touch in a day.
+
+**Making it yours**
+
+Per device, so your phone and your monitors can differ:
+
+- **Text size** — Small / Normal / Large / Extra large. Phones start on Large.
+- **Theme** — Auto, Light or Dark, from the toggle in the top bar.
+
+On a phone the tabs sit at the **bottom of the screen**, within thumb reach.
 
 **The Overview tab**
 

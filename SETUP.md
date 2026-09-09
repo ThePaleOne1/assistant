@@ -48,6 +48,7 @@ each one in whole and clicking **Run**. Each should say *Success*.
 | `supabase/02_reminders.sql` | The 7:45am / 4pm phone reminders |
 | `supabase/03_time_log.sql` | The time log table |
 | `supabase/04_seed_timelog.sql` | Your task tracker history — 307 entries, 20 Jul to 8 Sep |
+| `supabase/05_end_times.sql` | Adds the finish-time column to the tracker |
 
 > **If `02_reminders.sql` errors on `create extension`:** go to **Database →
 > Extensions**, search for `pg_net` and `pg_cron`, switch both on, then run it again.
