@@ -7,8 +7,6 @@
   var $  = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
-  var TOUCH = window.matchMedia('(hover: none)').matches;
-
   /* ---------- date helpers (local, not UTC) ---------- */
   function todayStr() {
     var d = new Date();
@@ -41,6 +39,21 @@
     if (n === 1) return 'Tomorrow';
     if (n < 0) return (-n) + 'd over';
     return fmtDate(s);
+  }
+  /* 'Tomorrow' is the widest label by a clear margin, and on a phone every
+     pixel the date column takes comes straight out of the note beside it.
+     Both spellings are rendered and CSS picks one: a media query can't
+     change text, and choosing in JS would mean a resize listener and a
+     redraw on every rotation. */
+  function dueLabelShort(s) {
+    return daysUntil(s) === 1 ? 'Tmrw' : dueLabel(s);
+  }
+  function dueLabelHtml(s) {
+    if (!s) return '';
+    var full = dueLabel(s), abbr = dueLabelShort(s);
+    if (full === abbr) return '<span>' + escapeHtml(full) + '</span>';
+    return '<span class="due-full">' + escapeHtml(full) + '</span>' +
+           '<span class="due-abbr">' + escapeHtml(abbr) + '</span>';
   }
   function addDays(n) {
     var d = new Date();
@@ -162,6 +175,43 @@
     toastTimer = setTimeout(hideToast, ms || 10000);
   }
   function hideToast() { clearTimeout(toastTimer); $('#toast').hidden = true; }
+
+  /* ---------- confirm ----------
+     Replaces window.confirm(). A browser told to block prompts on this site
+     returns false from confirm() without showing anything, so every guarded
+     action silently becomes a no-op and the app can't tell. That setting is
+     sticky and easy to tick by accident, and it took out deleting from the
+     Archive entirely. Owning the dialog also means the wording, the button
+     labels and the focus behaviour are ours. */
+  var confirmCb = null;
+  function askConfirm(o, onYes) {
+    var dlg = $('#dlg-confirm');
+    $('#confirm-title').textContent = o.title || 'Are you sure?';
+    $('#confirm-msg').textContent = o.message || '';
+    var yes = $('#confirm-yes');
+    yes.textContent = o.confirmLabel || 'Delete';
+    yes.className = 'btn ' + (o.danger === false ? 'primary' : 'danger');
+    confirmCb = onYes;
+    dlg.showModal();
+    // Cancel takes focus, not the destructive button — Enter should never be
+    // the thing that deletes.
+    $('#confirm-no').focus();
+  }
+  function wireConfirm() {
+    $('#confirm-yes').onclick = function () {
+      // The dialog's own `close` event is fired from a queued task, not
+      // synchronously, so a confirm dismissed by Escape or the × still has
+      // its callback armed for a moment afterwards. Being shut is the
+      // reliable signal that this answer is stale.
+      if (!$('#dlg-confirm').open) return;
+      var cb = confirmCb; confirmCb = null;
+      $('#dlg-confirm').close();
+      if (cb) cb();
+    };
+    $('#confirm-no').onclick = function () { confirmCb = null; $('#dlg-confirm').close(); };
+    // Escape, and the × in the header, both land here.
+    $('#dlg-confirm').addEventListener('close', function () { confirmCb = null; });
+  }
 
   /* ============================================================
      Boot
@@ -619,7 +669,7 @@
 
     var due = document.createElement('button');
     due.className = 'duebtn ' + dueClass(t.due_date);
-    due.innerHTML = svgBell + (t.due_date ? '<span>' + escapeHtml(dueLabel(t.due_date)) + '</span>' : '');
+    due.innerHTML = svgBell + dueLabelHtml(t.due_date);
     due.title = t.due_date ? 'Due ' + fmtDate(t.due_date) : 'Set a due date';
     due.onclick = function (e) { e.stopPropagation(); openDatePop(t, due); };
 
@@ -628,11 +678,7 @@
     del.setAttribute('aria-label', 'Delete');
     del.onclick = function () { deleteItem(t); };
 
-    var swipeBg = document.createElement('div');
-    swipeBg.className = 'swipe-bg'; swipeBg.innerHTML = svgX;
-
-    el.append(swipeBg, handle, body, due, del);
-    if (TOUCH) enableSwipe(el, t);
+    el.append(handle, body, due, del);
     return el;
   }
 
@@ -794,40 +840,6 @@
     Store.archive(it.id);
     closeNotePop(); closeDatePop();
     toast('Deleted “' + label + '”', 'Undo', function () { Store.restore(it.id); });
-  }
-
-  /* ---------- swipe to delete (touch only) ---------- */
-  function enableSwipe(el, item) {
-    var x0 = 0, y0 = 0, dx = 0, active_ = false, decided = false, id = null;
-    el.addEventListener('pointerdown', function (e) {
-      if (e.pointerType === 'mouse') return;
-      if (e.target.closest('.handle, .duebtn, .delbtn')) return;
-      x0 = e.clientX; y0 = e.clientY; dx = 0; decided = false; active_ = true; id = e.pointerId;
-    });
-    el.addEventListener('pointermove', function (e) {
-      if (!active_ || e.pointerId !== id) return;
-      var mx = e.clientX - x0, my = e.clientY - y0;
-      if (!decided) {
-        if (Math.abs(my) > 12 && Math.abs(my) > Math.abs(mx)) { active_ = false; return; }
-        if (Math.abs(mx) < 16) return;
-        decided = true;
-        el.classList.add('swiping');
-        if (document.activeElement && el.contains(document.activeElement)) document.activeElement.blur();
-      }
-      dx = Math.min(0, mx);
-      el.querySelector('.body').style.transform = 'translateX(' + dx + 'px)';
-    });
-    function end() {
-      if (!active_) return;
-      active_ = false;
-      var body = el.querySelector('.body');
-      el.classList.remove('swiping');
-      body.style.transform = '';
-      if (decided && dx < -Math.min(120, el.offsetWidth * 0.35)) deleteItem(item);
-      decided = false; dx = 0;
-    }
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
   }
 
   /* ============================================================
@@ -2339,8 +2351,10 @@
     };
     $('#search-input').addEventListener('input', function (e) { search = e.target.value.trim(); render(); });
 
+    wireConfirm();
+    wireArchive();
     $('#btn-settings').onclick = function () { fillSettings(); $('#dlg-settings').showModal(); };
-    $('#btn-archive').onclick = function () { fillArchive(); $('#dlg-archive').showModal(); };
+    $('#btn-archive').onclick = function () { archSel = {}; fillArchive(); $('#dlg-archive').showModal(); };
 
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -2511,7 +2525,14 @@
 
     $('#set-signout').onclick = function () {
       if (Store.pendingCount) {
-        if (!confirm('You have ' + Store.pendingCount + ' change(s) not yet synced. Sign out anyway?')) return;
+        askConfirm({
+          title: 'Sign out with unsynced changes?',
+          message: 'You have ' + Store.pendingCount + ' change' +
+            (Store.pendingCount === 1 ? '' : 's') + ' that has not reached the server yet. ' +
+            'Signing out now will lose ' + (Store.pendingCount === 1 ? 'it' : 'them') + '.',
+          confirmLabel: 'Sign out anyway'
+        }, function () { Store.signOut(); });
+        return;
       }
       Store.signOut();
     };
@@ -2615,10 +2636,15 @@
       nm.onchange = function () { c.name = nm.value; Store.saveSettings({ prefs: s.prefs }); };
       var x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
       x.onclick = function () {
-        if (!confirm('Remove “' + c.name + '”? Notes using it lose their highlight.')) return;
-        s.prefs.colours.splice(i, 1);
-        Store.saveSettings({ prefs: s.prefs });
-        fillSettings(); render();
+        askConfirm({
+          title: 'Remove “' + c.name + '”?',
+          message: 'Any note using this colour loses its highlight. The notes themselves stay.',
+          confirmLabel: 'Remove'
+        }, function () {
+          s.prefs.colours.splice(i, 1);
+          Store.saveSettings({ prefs: s.prefs });
+          fillSettings(); render();
+        });
       };
       el.append(sw, nm, x);
       cbox.appendChild(el);
@@ -2771,17 +2797,89 @@
       (Store.libFailed ? ' · offline mode (sync library unavailable)' : '');
   }
 
-  /* ---------- archive ---------- */
+  /* ---------- archive ----------
+     archSel holds the ids ticked for bulk deletion. It's keyed by id rather
+     than an index, so it survives the list being rebuilt underneath it —
+     which happens on every restore, every delete, and any change arriving
+     from the other device while the dialog is open. It's cleared when the
+     dialog opens, not when it closes, so a mis-tap can't quietly carry over
+     into the next session with the archive. */
+  var archSel = {};
+
+  function archSelectedIds() {
+    return archived().filter(function (it) { return archSel[it.id]; })
+      .map(function (it) { return it.id; });
+  }
+
+  function updateArchBar() {
+    var list = archived();
+    var n = archSelectedIds().length;
+    var bar = $('#archive-bar');
+    bar.hidden = !list.length;
+    var all = $('#archive-all');
+    all.checked = n > 0 && n === list.length;
+    // Part-way through is its own state, not a half-truth about "all".
+    all.indeterminate = n > 0 && n < list.length;
+    $('#archive-all-label').textContent = n ? n + ' selected' : 'Select all';
+    var btn = $('#archive-del-sel');
+    btn.disabled = !n;
+    btn.textContent = n ? 'Delete ' + n + ' selected' : 'Delete selected';
+  }
+
+  function wireArchive() {
+    $('#archive-all').onchange = function (e) {
+      var list = archived();
+      if (e.target.checked) list.forEach(function (it) { archSel[it.id] = true; });
+      else archSel = {};
+      fillArchive();
+    };
+
+    $('#archive-del-sel').onclick = function () {
+      var ids = archSelectedIds();
+      if (!ids.length) return;
+      askConfirm({
+        title: 'Delete ' + ids.length + ' item' + (ids.length === 1 ? '' : 's') + ' permanently?',
+        message: 'This removes ' + (ids.length === 1 ? 'it' : 'them') +
+          ' for good, on every device. There is no undo for this one.',
+        confirmLabel: 'Delete ' + ids.length
+      }, function () {
+        ids.forEach(function (id) { Store.hardDelete(id); delete archSel[id]; });
+        fillArchive();
+        toast(ids.length + ' item' + (ids.length === 1 ? '' : 's') + ' deleted');
+      });
+    };
+  }
+
   function fillArchive() {
     var box = $('#archive-list');
     var list = archived();
     box.innerHTML = '';
+    // Anything ticked that is no longer here (deleted, restored, or removed
+    // from the other device) must not keep counting towards the total.
+    var present = {};
+    list.forEach(function (it) { present[it.id] = true; });
+    Object.keys(archSel).forEach(function (id) { if (!present[id]) delete archSel[id]; });
+
     if (!list.length) {
       box.innerHTML = '<p class="ov-none">Nothing archived yet.</p>';
+      updateArchBar();
       return;
     }
     list.forEach(function (it) {
-      var el = document.createElement('div'); el.className = 'arch-item';
+      var el = document.createElement('div');
+      el.className = 'arch-item' + (archSel[it.id] ? ' sel' : '');
+
+      var lab = document.createElement('label'); lab.className = 'arch-check';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!archSel[it.id];
+      cb.setAttribute('aria-label', 'Select ' + (it.name || 'Untitled'));
+      cb.onchange = function () {
+        if (cb.checked) archSel[it.id] = true; else delete archSel[it.id];
+        el.classList.toggle('sel', cb.checked);
+        updateArchBar();
+      };
+      lab.appendChild(cb);
+
       var t = document.createElement('div'); t.className = 't';
       t.innerHTML = '<b>' + escapeHtml(it.name || 'Untitled') + '</b>' +
         (it.note ? ' <span>— ' + escapeHtml(it.note) + '</span>' : '') +
@@ -2794,20 +2892,28 @@
         var list2 = active();
         var last = list2[list2.length - 1];
         Store.restore(it.id, last ? last.position + 1024 : 1024);
+        delete archSel[it.id];
         fillArchive(); render();
       };
 
       var d = document.createElement('button');
       d.className = 'btn danger small'; d.textContent = 'Delete';
       d.onclick = function () {
-        if (!confirm('Permanently delete “' + (it.name || 'Untitled') + '”? This cannot be undone.')) return;
-        Store.hardDelete(it.id);
-        fillArchive();
+        askConfirm({
+          title: 'Delete “' + (it.name || 'Untitled') + '” permanently?',
+          message: 'This removes it for good, on every device. There is no undo for this one.',
+          confirmLabel: 'Delete'
+        }, function () {
+          Store.hardDelete(it.id);
+          delete archSel[it.id];
+          fillArchive();
+        });
       };
 
-      el.append(t, r, d);
+      el.append(lab, t, r, d);
       box.appendChild(el);
     });
+    updateArchBar();
   }
 
   function relTime(iso) {
@@ -2833,6 +2939,8 @@
     active: active, sectionOf: sectionOf,
     blockIds: blockIds, planMove: planMove, positionsBetween: positionsBetween,
     guessColour: guessColour, daysUntil: daysUntil, dueLabel: dueLabel,
+    dueLabelShort: dueLabelShort, dueLabelHtml: dueLabelHtml,
+    askConfirm: askConfirm, fillArchive: fillArchive,
     fmtDate: fmtDate, dueClass: dueClass, nextWeekday: nextWeekday,
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log

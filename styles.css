@@ -42,6 +42,11 @@
   --row-h:   34px;
   --pad:     8px;
   --due-w:   88px;     /* the date column, fixed so notes never shift */
+
+  /* The side gutter for the list. A section header and the rows beneath it
+     must read as one block, so both take their inset from here rather than
+     each carrying its own number — they drifted apart twice that way. */
+  --list-gutter: 8px;
 }
 
 :root[data-size="m"] {
@@ -299,7 +304,7 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .hdr {
   display: flex; align-items: center; gap: 2px;
   padding: 0 10px 0 2px;
-  margin: 20px 8px 0;
+  margin: 20px var(--list-gutter) 0;
   min-height: calc(var(--tap) + 2px);
   position: relative;
   background: var(--band);
@@ -343,13 +348,9 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   position: relative;
-  /* let the browser own vertical scrolling, give us horizontal swipes */
-  touch-action: pan-y;
 }
-.row .body { transition: transform .16s ease; }
-.row.swiping .body { transition: none; }
 .row:first-of-type { border-top: 1px solid var(--border); }
-.rows-wrap { border-radius: var(--radius); overflow: hidden; margin: 0 8px; box-shadow: var(--shadow); }
+.rows-wrap { border-radius: var(--radius); overflow: hidden; margin: 0 var(--list-gutter); box-shadow: var(--shadow); }
 .rows-wrap .row:last-child { border-bottom: 0; }
 .rows-wrap .row:first-of-type { border-top: 0; }
 
@@ -444,6 +445,10 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 }
 .duebtn svg { flex: none; }
 .duebtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Two spellings of the same label are rendered; the phone breakpoint picks
+   the short one. Both are flex items, so `display` toggles between block
+   and none rather than inline. */
+.due-abbr { display: none; }
 .duebtn.nodate { justify-content: flex-start; }
 .duebtn svg { width: 13px; height: 13px; stroke-width: 2.1; }
 .duebtn:hover { background: var(--surface-2); color: var(--text); }
@@ -484,18 +489,6 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
    collide with a modifier on a control */
 .list-empty { text-align: center; padding: 48px 20px; }
 .list-empty p { margin: 4px 0; }
-
-/* swipe-to-delete on touch */
-.row.swiping { transition: none; }
-.row .swipe-bg {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: flex-end;
-  padding-right: 16px;
-  background: var(--danger-bg); color: var(--danger);
-  border-radius: 0;
-  opacity: 0; pointer-events: none;
-}
-.row.swiping .swipe-bg { opacity: 1; }
 
 /* ---------- Drag ---------- */
 .dragging { opacity: .28; }
@@ -616,6 +609,14 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 }
 .dlg-head h2 { margin: 0; font-size: var(--fs-lg); }
 .dlg-body { padding: 4px 18px 24px; overflow-y: auto; max-height: calc(88dvh - 56px); }
+
+/* The confirmation is a smaller dialog, and it can open on top of another
+   one (deleting from inside the Archive), which nested modals handle. */
+#dlg-confirm { width: min(94vw, 420px); }
+#dlg-confirm .dlg-body { padding-bottom: 18px; }
+#confirm-msg { margin: 10px 0 18px; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.confirm-actions .btn { flex: 0 1 auto; }
 
 .group { padding: 18px 0; border-bottom: 1px solid var(--border); }
 .group:last-of-type { border-bottom: 0; }
@@ -937,11 +938,45 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 .ov-none { color: var(--muted); font-size: var(--fs-sm); padding: 2px 0; }
 
 /* ---------- Archive ---------- */
+
+/* Select-all and the bulk action, pinned above the list so the count stays
+   visible while you scroll a long archive. */
+.arch-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px 0 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.arch-bar .btn { margin-left: auto; }
+.arch-bar .btn:disabled { opacity: .45; cursor: default; }
+.arch-bar .btn:disabled:hover { background: var(--surface); }
+
+/* The tick and its label are one target — on a phone the box alone is a
+   miserable thing to hit. */
+.arch-check {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; padding: 2px 0;
+  font-size: var(--fs-sm); color: var(--text);
+  cursor: pointer;
+  min-height: calc(var(--tap) - 10px);
+}
+.arch-check input {
+  width: 18px; height: 18px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.arch-all { color: var(--muted); }
+
 .arch-item {
   display: flex; align-items: center; gap: 8px;
   padding: 9px 0;
   border-bottom: 1px solid var(--border);
 }
+.arch-item.sel { background: var(--accent-bg); }
+.arch-item > .arch-check { flex: none; }
 .arch-item .t { flex: 1 1 auto; min-width: 0; }
 .arch-item .t b { font-weight: 500; }
 .arch-item .t span { color: var(--muted); font-size: var(--fs-sm); }
@@ -950,7 +985,7 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 /* ---------- Desktop tweaks ---------- */
 @media (min-width: 760px) {
   .list, .list-foot, #overview { max-width: 860px; margin-inline: auto; }
-  .rows-wrap { margin-inline: 0; }
+  :root { --list-gutter: 0px; }
   .appbar, .tabs, .searchbar { padding-inline: max(14px, calc((100vw - 860px) / 2)); }
   .fab { display: none; }
   .scroll-pad { height: 60px; }
@@ -1004,7 +1039,8 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   .duebtn { height: calc(var(--tap) - 12px); padding: 0 10px; }
 
   .daybar { padding: 12px 8px 8px; }
-  .sheet, .rows-wrap { margin-inline: 6px; }
+  :root { --list-gutter: 6px; }
+  .sheet { margin-inline: 6px; }
 
   /* Category names are short, so the Type column can give room back to the
      task text, which is the column that actually needs it on a phone. */
@@ -1013,77 +1049,23 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
   /* The date column is fixed so notes stay aligned, but on a phone every
      pixel it takes comes off the name and note. Drop the bell once a date
-     is set — the coloured chip already says there is one — and tighten
-     the column to suit. */
-  :root { --due-w: 74px; }
+     is set — the coloured chip already says there is one — shorten
+     'Tomorrow' to 'Tmrw', and tighten the column to suit.
+
+     `:root[data-size]` is deliberate, not belt-and-braces. A media query
+     adds no specificity, so a plain `:root` here loses to the
+     `:root[data-size="l"]` type-scale block above and the phone never got
+     its narrower column at all — the tightening silently did nothing on
+     the one device it was written for. Any override of a type-scale token
+     from inside a media query needs to match that specificity.
+
+     64px fits the widest label that survives abbreviation ('12d over',
+     63px at the Large text size). */
+  :root, :root[data-size] { --due-w: 64px; }
   .duebtn.set svg, .duebtn.soon svg, .duebtn.overdue svg { display: none; }
   .duebtn { padding: 0 4px; }
-}
-
-/* ---------- Overview ---------- */
-#overview { padding: 14px 14px 0; display: grid; gap: 12px; }
-.ov-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  padding: 14px 16px;
-}
-.ov-card h3 {
-  margin: 0 0 10px;
-  font-size: var(--fs-xs); font-weight: 700;
-  letter-spacing: .07em; text-transform: uppercase;
-  color: var(--muted);
-  display: flex; align-items: center; gap: 8px;
-}
-.ov-badge {
-  font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0;
-  padding: 1px 7px; border-radius: 999px;
-  background: var(--surface-2); color: var(--muted);
-}
-.ov-badge.bad  { background: var(--danger-bg); color: var(--danger); }
-.ov-badge.warn { background: var(--warn-bg);   color: var(--warn); }
-
-.ov-item {
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--border);
-  cursor: pointer;
-}
-.ov-item:first-of-type { border-top: 0; }
-.ov-item .t { flex: 1 1 auto; min-width: 0; }
-.ov-item .t b { font-weight: 500; }
-.ov-item .t span { color: var(--muted); font-size: var(--fs-sm); }
-.ov-item .s { font-size: var(--fs-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
-.ov-item .w { font-size: var(--fs-xs); font-weight: 600; flex: none; }
-.ov-item .w.bad  { color: var(--danger); }
-.ov-item .w.warn { color: var(--warn); }
-
-.ov-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 10px; }
-.ov-stat { text-align: center; padding: 6px 2px; background: var(--surface-2); border-radius: 9px; }
-.ov-stat b { display: block; font-size: var(--fs-xl); font-weight: 650; letter-spacing: -.02em; }
-.ov-stat span { font-size: var(--fs-xs); color: var(--muted); }
-
-.ov-none { color: var(--muted); font-size: var(--fs-sm); padding: 2px 0; }
-
-/* ---------- Archive ---------- */
-.arch-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border);
-}
-.arch-item .t { flex: 1 1 auto; min-width: 0; }
-.arch-item .t b { font-weight: 500; }
-.arch-item .t span { color: var(--muted); font-size: var(--fs-sm); }
-.arch-item .t em { display: block; font-size: var(--fs-xs); color: var(--faint); font-style: normal; }
-
-/* ---------- Desktop tweaks ---------- */
-@media (min-width: 760px) {
-  .list, .list-foot, #overview { max-width: 860px; margin-inline: auto; }
-  .rows-wrap { margin-inline: 0; }
-  .appbar, .tabs, .searchbar { padding-inline: max(14px, calc((100vw - 860px) / 2)); }
-  .fab { display: none; }
-  .scroll-pad { height: 60px; }
+  .due-full { display: none; }
+  .due-abbr { display: block; }
 }
 
 /* Phone. A name and a note won't both fit on one line at this width, so

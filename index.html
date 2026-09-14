@@ -367,7 +367,32 @@
   </form>
   <div class="dlg-body">
     <p class="muted small">Deleted items land here. Restore puts them back at the bottom of the list, ready to drag where you want them. Deleting from here is permanent.</p>
+    <div class="arch-bar" id="archive-bar" hidden>
+      <label class="arch-check arch-all">
+        <input type="checkbox" id="archive-all">
+        <span id="archive-all-label">Select all</span>
+      </label>
+      <button class="btn danger small" id="archive-del-sel" type="button" disabled>Delete selected</button>
+    </div>
     <div id="archive-list"></div>
+  </div>
+</dialog>
+
+<!-- Asking before something irreversible. Deliberately not the browser's own
+     confirm(): a browser that has been told to block prompts returns false
+     without showing anything, which silently breaks every delete with no way
+     for the app to know it happened. -->
+<dialog id="dlg-confirm">
+  <form method="dialog" class="dlg-head">
+    <h2 id="confirm-title">Are you sure?</h2>
+    <button class="iconbtn" value="cancel" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </form>
+  <div class="dlg-body">
+    <p id="confirm-msg"></p>
+    <div class="confirm-actions">
+      <button class="btn" id="confirm-no" type="button">Cancel</button>
+      <button class="btn danger" id="confirm-yes" type="button">Delete</button>
+    </div>
   </div>
 </dialog>
 
