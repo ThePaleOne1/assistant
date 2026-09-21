@@ -290,6 +290,7 @@
     maybeMorningRoutine();
     rememberAppUrl();
     registerSW();
+    reportUpdate();
   }
 
   /* Store where the app lives so a reminder on the phone can be
@@ -2353,6 +2354,7 @@
 
     wireConfirm();
     wireArchive();
+    $('#set-update').onclick = checkForUpdate;
     $('#btn-settings').onclick = function () { fillSettings(); $('#dlg-settings').showModal(); };
     $('#btn-archive').onclick = function () { archSel = {}; fillArchive(); $('#dlg-archive').showModal(); };
 
@@ -2925,6 +2927,90 @@
     return 'on ' + fmtDate(iso.slice(0, 10));
   }
 
+  /* ---------- updates ----------
+     "Check for updates" in Settings. The service worker is network-first,
+     so normally a reload is enough — but the browser's own HTTP cache sits
+     underneath it, and GitHub Pages lets browsers keep files for ten
+     minutes. A reload straight after an upload can therefore still build
+     the page from old files, which looks exactly like the update failing.
+
+     So this: asks GitHub for the live version (bypassing every cache),
+     unregisters the service worker, empties its caches, re-downloads each
+     app file with cache:'reload' so the HTTP cache holds fresh copies too,
+     and only then reloads. It only ever clears anything after a successful
+     check, i.e. while online — clearing caches offline would leave the
+     app unable to open at all. Unsynced edits live in localStorage, not in
+     any of these caches, so they survive. */
+  var SHELL_FILES = ['./', './index.html', './styles.css', './config.js',
+                     './sb.js', './app.js', './manifest.webmanifest'];
+  var UPDATE_KEY = 'assist-update-to';
+
+  function parseVersion(src) {
+    var m = /VERSION\s*:\s*'([^']*)'/.exec(src || '');
+    return m ? m[1] : null;
+  }
+  function currentVersion() { return (window.CONFIG && window.CONFIG.VERSION) || ''; }
+
+  function checkForUpdate() {
+    if (window.__PREVIEW__) { toast('Updates don’t apply to the preview'); return; }
+    var btn = $('#set-update');
+    btn.disabled = true; btn.textContent = 'Checking…';
+    function done() { btn.disabled = false; btn.textContent = 'Check for updates'; }
+
+    fetch('config.js?check=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (src) {
+        var live = parseVersion(src);
+        if (!live) throw new Error('no version in config.js');
+        done();
+        if (live === currentVersion()) {
+          toast('You have the latest version', 'Reload anyway', function () { forceUpdate(live); });
+        } else {
+          toast('Updating to ' + live + '…');
+          forceUpdate(live);
+        }
+      })
+      .catch(function (e) {
+        console.warn('[update]', e);
+        done();
+        toast('Couldn’t reach the server to check. Are you online?');
+      });
+  }
+
+  function forceUpdate(target) {
+    try { sessionStorage.setItem(UPDATE_KEY, target || ''); } catch (e) {}
+    var jobs = [];
+    if ('serviceWorker' in navigator) {
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+        return Promise.all(regs.map(function (r) { return r.unregister(); }));
+      }));
+    }
+    if (window.caches) {
+      jobs.push(caches.keys().then(function (keys) {
+        return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      }));
+    }
+    Promise.all(jobs).catch(function () {})
+      .then(function () {
+        return Promise.all(SHELL_FILES.map(function (f) {
+          return fetch(f, { cache: 'reload' }).catch(function () {});
+        }));
+      })
+      .then(function () { location.reload(); });
+  }
+
+  /* After the reload, say whether it worked. GitHub can take a few minutes
+     to publish an upload, so "still on the old one" is a real outcome and
+     deserves a plain answer rather than silence. */
+  function reportUpdate() {
+    var want = null;
+    try { want = sessionStorage.getItem(UPDATE_KEY); sessionStorage.removeItem(UPDATE_KEY); } catch (e) {}
+    if (want === null) return;
+    var now = currentVersion();
+    if (!want || want === now) toast('Up to date — version ' + now);
+    else toast('Still on ' + now + '. GitHub can take a few minutes to publish — try again shortly.');
+  }
+
   /* ---------- service worker ---------- */
   function registerSW() {
     if (window.__PREVIEW__) return;
@@ -2940,7 +3026,7 @@
     blockIds: blockIds, planMove: planMove, positionsBetween: positionsBetween,
     guessColour: guessColour, daysUntil: daysUntil, dueLabel: dueLabel,
     dueLabelShort: dueLabelShort, dueLabelHtml: dueLabelHtml,
-    askConfirm: askConfirm, fillArchive: fillArchive,
+    askConfirm: askConfirm, fillArchive: fillArchive, parseVersion: parseVersion,
     fmtDate: fmtDate, dueClass: dueClass, nextWeekday: nextWeekday,
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log

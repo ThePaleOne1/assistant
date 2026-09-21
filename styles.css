@@ -612,6 +612,11 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
 /* The confirmation is a smaller dialog, and it can open on top of another
    one (deleting from inside the Archive), which nested modals handle. */
+/* the version line and the update button share a row, and stack on a
+   phone rather than squeezing the version into a sliver */
+.ver-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 14px; }
+.ver-row p { margin: 0; flex: 1 1 12rem; }
+
 #dlg-confirm { width: min(94vw, 420px); }
 #dlg-confirm .dlg-body { padding-bottom: 18px; }
 #confirm-msg { margin: 10px 0 18px; }

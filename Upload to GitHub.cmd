@@ -1,5 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
+rem UTF-8 console, so the dash in the version string prints properly
+chcp 65001 >nul
 title Upload Assistant to GitHub
 cd /d "%~dp0"
 
@@ -53,6 +55,10 @@ if errorlevel 1 (
   echo.
 )
 
+rem ---- which version is this? --------------------------------------
+set "VER=unknown"
+for /f "tokens=2 delims='" %%V in ('findstr /c:"VERSION:" config.js') do set "VER=%%V"
+
 rem ---- stage everything that isn't in .gitignore -------------------
 git add -A || goto :fail
 
@@ -75,42 +81,111 @@ if defined LEAK (
   exit /b 1
 )
 
-rem ---- anything to do? --------------------------------------------
+rem ---- commit anything new -----------------------------------------
+set "COMMITTED="
 git diff --cached --quiet
-if not errorlevel 1 (
-  echo   Nothing has changed since the last upload.
-  echo.
-  pause
-  exit /b 0
-)
+if not errorlevel 1 goto :checkgithub
 
+echo   Version: !VER!
+echo.
 echo   About to upload:
 echo.
 git diff --cached --name-status
 echo.
-
 set "MSG="
 set /p "MSG=  Describe the change (or just press Enter):  "
 if "!MSG!"=="" set "MSG=Update"
-
 echo.
 git commit -m "!MSG!" >nul || goto :fail
+set "COMMITTED=1"
+
+rem ---- is there anything GitHub doesn't have yet? ------------------
+rem Asked every time, not only when there's something new to commit.
+rem
+rem The old version of this script only pushed straight after making a
+rem commit. If that push failed - a GitHub sign-in window closed, the
+rem wifi dropping - the commit sat on this computer alone, and every
+rem later run said "nothing has changed" and never tried again. v1.6
+rem sat stranded like that for a week. Comparing against GitHub itself
+rem means a failed upload is always picked up by the next run.
+:checkgithub
+echo   Checking what GitHub has...
+git fetch origin main >nul 2>&1
+if errorlevel 1 goto :offline
+
+set "AHEAD=0"
+for /f %%N in ('git rev-list --count origin/main..HEAD') do set "AHEAD=%%N"
+if "!AHEAD!"=="0" goto :uptodate
+
+if not defined COMMITTED (
+  echo.
+  echo   Found !AHEAD! saved change^(s^) that never reached GitHub.
+  echo   Version: !VER!
+  echo   Uploading them now.
+)
+echo.
 
 rem ---- bring in anything changed on GitHub, then push --------------
 git pull --rebase origin main || goto :conflict
-git push -u origin main || goto :fail
+git push -u origin main || goto :pushfail
+
+rem ---- make sure it actually landed ---------------------------------
+git fetch origin main >nul 2>&1
+set "AHEAD=0"
+for /f %%N in ('git rev-list --count origin/main..HEAD') do set "AHEAD=%%N"
+if not "!AHEAD!"=="0" goto :pushfail
 
 echo.
 echo   ==========================================
-echo   Done. GitHub Pages rebuilds in about a minute.
+echo   Done. Version !VER! is on GitHub.
+echo   GitHub Pages rebuilds in about a minute.
 echo.
 echo   %SITE%
 echo.
-echo   Then reload the app on each device. Check the version
-echo   at the bottom of Settings to confirm it arrived.
+echo   Then on each device: Settings, Check for updates.
 echo.
 pause
 exit /b 0
+
+:uptodate
+echo.
+echo   GitHub is already up to date. Version !VER! is live.
+echo.
+echo   If a device still shows an older version, open
+echo   Settings on it and press Check for updates.
+echo.
+pause
+exit /b 0
+
+:offline
+echo.
+echo   Couldn't reach GitHub - check the internet connection.
+if defined COMMITTED (
+  echo.
+  echo   Your change is saved on this computer. Run this again
+  echo   once you're online and it will be uploaded then.
+)
+echo.
+pause
+exit /b 1
+
+:pushfail
+echo.
+echo   ==========================================
+echo   NOT UPLOADED.
+echo.
+echo   Your changes are saved on this computer, but they did not
+echo   reach GitHub, so the live app has not changed.
+echo.
+echo   The usual cause is GitHub sign-in: a browser window or a
+echo   sign-in box opened and was closed, or timed out. Read the
+echo   message above for the exact reason.
+echo.
+echo   Just run this again - it will find the saved changes and
+echo   try the upload again. Nothing will be lost.
+echo.
+pause
+exit /b 1
 
 :conflict
 echo.

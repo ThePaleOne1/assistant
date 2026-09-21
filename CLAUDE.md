@@ -43,7 +43,7 @@ In daily use and working: todo list, daily tracker, insights, sync between the w
 PC and the phone, and phone reminders. 307 rows of real history imported from his
 spreadsheet.
 
-Current version is **1.6** (see `config.js`). The version string shows at the bottom
+Current version is **1.6.1** (see `config.js`). The version string shows at the bottom
 of Settings — that's how he checks whether a device has picked up a change.
 
 **There is no outstanding setup work.** Everything the earlier handover listed as
@@ -75,7 +75,17 @@ are real regression tests rather than decoration.
 Plain HTML, CSS and JavaScript. No build step, no npm, no framework. The only
 external dependency is the Supabase client from a CDN.
 
-**Uploading:** double-click `Upload to GitHub.cmd`. It stages everything, shows what
+**Uploading:** double-click `Upload to GitHub.cmd`. It now compares against GitHub
+itself on every run, so a failed upload is always retried next time, and it checks the
+push actually landed before saying "Done". Then on each device: **Settings → Check for
+updates**, which clears the service worker, its caches and the browser's HTTP cache
+before reloading.
+
+**To see what is actually live**, fetch `https://thepaleone1.github.io/assistant/config.js`
+with WebFetch — the cloud container's `curl` is blocked from github.io by egress policy,
+but WebFetch gets through. Do this before assuming a device-side cache problem.
+
+The script also stages everything, shows what
 changed, and refuses to run if a private file is about to be published. Do not go
 back to dragging files into GitHub's web UI — a file got missed that way once and
 cost a debugging cycle. A Claude session **cannot** run this script for him: it
@@ -273,7 +283,18 @@ These all cost real debugging time. Each has a regression test now.
     That setting is one stray tick in a Firefox dialog and it is sticky. It took out
     permanent deletion from the Archive completely. Use `askConfirm()` in `app.js`.
 
-11. **A stale "can't do that" note is worse than no note.** Two of the limitations
+11. **A failed push strands the commit, and the old upload script hid it.** The script
+    committed first and pushed second. When the push failed (almost certainly a GitHub
+    sign-in prompt closed or timed out), the commit stayed on the PC only — and every
+    later run checked "anything new to commit?", found nothing, and said "Nothing has
+    changed since the last upload". v1.5 and v1.6 sat stranded for a week while he
+    cleared caches on two devices trying to get off 1.4. **When a device shows an old
+    version, check what's live first** (see Uploading). The script now counts commits
+    GitHub doesn't have (`git rev-list --count origin/main..HEAD`), pushes if there are
+    any, and verifies afterwards. It is also CRLF now, as `.gitattributes` always said
+    it should be — `cmd.exe` can lose `goto` labels in LF-only files.
+
+12. **A stale "can't do that" note is worse than no note.** Two of the limitations
    recorded in this file were technical accidents that had since stopped being true,
    and they were quietly steering sessions away from things that work. If you hit a
    limitation, write down *why* it's true, so the next session can test whether it
