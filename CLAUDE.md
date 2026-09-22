@@ -43,19 +43,30 @@ In daily use and working: todo list, daily tracker, insights, sync between the w
 PC and the phone, and phone reminders. 307 rows of real history imported from his
 spreadsheet.
 
-**v1.7 added:** checklists inside items, a Jobs tab, tap-to-read / tap-again-to-edit
-on the phone, a per-device toggle to hide due dates, Claude and Lunch tracker
-categories (Lunch is a break and stays out of totals), and CEILED renamed Ceiled.
+**v1.7 (live on both devices from 22 Sep):** a Jobs tab, tap-to-read /
+tap-again-to-edit on the phone, a per-device toggle to hide due dates, Claude and
+Lunch tracker categories (Lunch is a break and stays out of totals), CEILED renamed
+Ceiled, and a Settings → Check for updates button.
 
-Current version is **1.7** (see `config.js`).
+**v1.8 (built 22 Sep, not yet uploaded when this was written):** the v1.7 checklist
+is gone — he'd meant *more than one note per item*, which is what 1.8 does. Jobs are
+now name + Details (free writing) + Tasks, where the tasks *are* the job item's notes.
+An open row closes when you tap away. Every new UI element was redone from the app's
+existing parts (see "New UI is built from existing parts" below). Any checklist lines
+entered while 1.7 was live are carried over as extra notes on first start.
 
-**v1.7 needs `supabase/06_subtasks_jobs.sql` run in Supabase *before* it is uploaded**
-— items gain three columns, and until they exist every item write is rejected. The
-sync badge says "Needs DB update" if that step was missed; nothing is lost, changes
-wait on the device. Confirm with him that it ran.
+Current version is **1.8** (see `config.js`).
 
-**He was stuck on 1.4 until 21 September** — v1.5 and v1.6 never reached GitHub
-(trap 11). Everything from 1.5 to 1.7 goes out in one upload.
+**v1.8 needs `supabase/06_jobs_notes.sql` run in Supabase *before* it is uploaded**
+— items gain `extra_notes` (and `is_job` / `job_notes` if the earlier 06 wasn't run).
+Until they exist, item writes are rejected and the sync badge says "Needs DB update";
+nothing is lost, changes wait on the device. `06_subtasks_jobs.sql` is a superseded
+stub — nothing to run. Confirm with him that the new file ran.
+
+**Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
+site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
+(check `.git/logs/refs/remotes/origin/main`) but the site is stale, give Pages time
+before hunting for another cause.
 
 The version string shows at the bottom of Settings — that's how he checks whether a
 device has picked up a change.
@@ -68,17 +79,17 @@ colours to his own choices — leave them alone unless he asks.
 
 ### Verification status
 
-Run on 22 September 2026 against v1.7:
+Run on 22 September 2026 against v1.8:
 
 | Suite | Result |
 |---|---|
-| Logic (`tools/test-logic.js`) | **217/217 passed** — incl. the tag retag run over the real imported history |
-| DOM (`tools/run-dom-tests.py`) | **240/240 at each of desktop, tablet and phone** |
-| Real-touch probes (phone only) | **36/36** — genuine fingertip taps on an emulated Galaxy A25 |
+| Logic (`tools/test-logic.js`) | **226/226 passed** — incl. the tag retag over the real imported history, and the 1.7 checklist carry-over |
+| DOM (`tools/run-dom-tests.py`) | **262/262 at each of desktop, tablet and phone** |
+| Real-touch probes (phone only) | **42/42** — genuine fingertip taps on an emulated Galaxy A25 |
 
-Every v1.7 fix was mutation-checked: each was undone in turn and the suite confirmed
-to fail (8 of 8 caught). Two checks that initially passed for the wrong reason were
-found this way and rewritten.
+Mutation-checked: 14 of the v1.7/v1.8 fixes were each undone in turn and the suite
+confirmed to fail — 14 of 14 caught. Layout was also checked by eye from screenshots
+at phone and desktop size (see trap 14 for why that matters).
 
 **Not exercised end to end:** Settings → Check for updates (needs the live site and
 a signed-in session — the preview declines it, and that refusal is tested), and the
@@ -143,7 +154,8 @@ protocol with a realistic contact radius. They're needed because whether a tap p
 focus in a field, where the caret lands, and which element Chrome hands a fingertip
 tap to are all browser default actions that synthetic `.click()` events can't show.
 Every phone interaction rule is checked there: tap to open, tap to edit, tap-out,
-double-tap, fingertip at the edge of a line, building a checklist, the date toggle,
+double-tap, fingertip at the edge of a line, tapping away to close, adding a second
+note, the date toggle,
 and the Jobs tab.
 
 Both suites should be green, at every viewport, before uploading.
@@ -189,7 +201,7 @@ Work PC      ─┘      • todo + time log          │
 | `sb.js` | Data layer: auth, sync, offline outbox, realtime. |
 | `config.js` | Supabase URL + publishable key, `ALLOW_SIGNUP`, `VERSION`. |
 | `sw.js` | Service worker. Network-first, cache as offline fallback. |
-| `supabase/01–06*.sql` | Schema, reminders, time log, history seed, end-times migration, checklists + jobs columns. |
+| `supabase/01–06*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub). |
 | `tools/` | Dev only: mock store, preview builder, both test suites, the DOM runner, seed data. |
 | `Reference/` | The original spreadsheet the history came from. |
 
@@ -203,37 +215,68 @@ app renumbers everything once and carries on.
 `time_entries` holds the tracker. **`hours` is stored as well as `end_time`**, because
 every insight is built on `hours` and the 307 imported rows only ever had durations.
 
-**Checklists and jobs live on items (v1.7), not in tables of their own.** `subtasks`
-is a JSON list of `{id, text, done}` written back whole; `is_job` marks an item as a
-job; `job_notes` is the free-form notes from the Jobs tab. A job *is* its todo item,
-so it syncs, archives, restores and undoes with no extra machinery, and ticking a
-task in the list ticks it on the Jobs tab because it is the same data. The app keeps
-one "Jobs" section header, found by `prefs.jobs_section_id` and created on demand.
+**Multiple notes and jobs live on items, not in tables of their own (v1.8).** An
+item's *first* note is still `note` / `note_colour` — so reminders, search, the
+Overview and the learned chips never had to change — and any further notes are
+`extra_notes`, a JSON list of `{id, text, colour}` written back whole. In code, notes
+are addressed as field `'note'` or `'xnote:<id>'`; `getNote` / `setNote` /
+`addNoteAfter` / `removeNote` handle both, and removing the first note promotes the
+next into its place. `is_job` marks a job; `job_notes` is its Details. A job *is* its
+todo item, so it syncs, archives, restores and undoes with no extra machinery, and
+its Tasks on the Jobs tab are literally its notes — edit either, it's the same data.
+The app keeps one "Jobs" section header (`prefs.jobs_section_id`, made on demand).
+`subtasks` (the 1.7 checklist) may still exist as an empty column; nothing reads it
+after the one-time carry-over.
 
 ---
 
 ## Design decisions worth not undoing
 
-**Phone: read first, edit second (v1.7).** On a touch screen a closed row's fields
-don't take taps (`pointer-events: none` under `(hover: none) and (pointer: coarse)`):
-a tap opens the row, showing name and note in full as wrapping textareas plus its
-checklist in a full-width band underneath; a tap on a field in an open row edits it;
-a quick double-tap opens and edits in one go. **While editing, a tap anywhere else in
-the list or on the Jobs tab only ends the edit** — it doesn't go through — except on
-popover chips, colours and dates, which are made for mid-edit use. The tab bar and
-top buttons behave normally. Desktop is unchanged: click to edit. Open rows are per
-device and never synced.
+**The word "note" means only the highlighter chips.** He once used it for two
+things; he untangled it himself. A job's free writing is **Details** on screen (the
+column is still `job_notes`). Keep the two apart in UI copy.
+
+**Notes stack one per line.** A row with several notes grows downward (`.row.multi`);
+its name, first note, date and × stay level on the first line (DOM test 11k), lined up
+by each button's own height (`--due-h`, `--del-h`, `--exp-h`), which the phone
+overrides. Enter in a note still adds a new *item*, as it always did; **Shift+Enter**
+adds another note; "+ note" shows in an open row; Backspace in an empty extra note
+removes it. On the Jobs tab, Enter in a task starts the next task.
+
+**Phone: read first, edit second.** On a touch screen a closed row's fields don't
+take taps (`pointer-events: none` under `(hover: none) and (pointer: coarse)`): a tap
+opens the row, showing name and notes in full as wrapping textareas; a tap on a field
+in an open row edits it; a quick double-tap opens and edits in one go. **While
+editing, a tap anywhere else in the list or on the Jobs tab only ends the edit** — it
+doesn't go through — except on popover chips, colours and dates, which are made for
+mid-edit use. The tab bar and top buttons behave normally. Desktop keeps click to edit.
+
+**One open row at a time, and it closes when you tap away (v1.8).** Tapping another
+row closes this one and opens that one in the same tap; a tap on blank space, another
+tab, or a popover's blank background just closes it; Escape closes it (after the note
+chips, if they're up). A tap inside the open row, or on a chip, colour or date, keeps
+it open. Same on desktop. `openRowId`, per device, never synced.
+
+**New UI is built from existing parts, never browser defaults.** He called out 1.7's
+new elements for not matching. Reuse: the section band (`.hdr`) for a heading, the
+white `.rows-wrap` card for a body, the tracker grid's small-caps strip
+(`.sheet-head` look) for labels, row lines with `--border` dividers, highlighter
+`.note` chips, the list's faint "+ task" link (`.addrow button`), `.btn.ghost.small`
+for actions, `.hdr .count` pills for counts, the section caret for open/close, and the
+accent colour for selection. Checkboxes are drawn by the app (`appearance: none`),
+not left native. Check new UI by screenshot at phone and desktop size next to the
+existing screens before calling it done.
 
 **Hidden due dates keep a coloured edge.** The date toggle (app bar, Todo tab only,
 also Settings → This device) is per device. Overdue items get a red left edge and
 due-soon an amber one, costing no width, so hiding dates can't hide a deadline.
 Opening a row shows its date.
 
-**Notes line up in one column — including rows with a checklist.** The checklist's
-progress chip (`.subcount`) sits *inside* the name's half of the row, and that row's
-name gives up exactly the chip's width plus the 6px gap. Anywhere else, the chip
-pushes only that row's note out of line. Tested at every width, dates shown and
-hidden (DOM test 11j).
+**Notes line up in one column.** Every note in a section starts at the same place,
+whatever else the row carries — a date, several notes, dates hidden. The note stack
+(`.notes`) takes exactly the sizing a single note used to. (A v1.7 checklist chip once
+pushed one row's note out of line; anything added to a row must not.) Tested at every
+width, dates shown and hidden (DOM test 11j).
 
 **Lunch is a break, not work.** `prefs.break_categories` (default `['Lunch']`). A break
 still takes its place in the day's finish-time chain and shows in the day bar, but
@@ -388,12 +431,30 @@ These all cost real debugging time. Each has a regression test now.
     wrong page.
 
 15. **A `flex-wrap` row can push its own text column off the first line.** Opening
-    a row makes it wrap, so the checklist band can drop underneath. A textarea's
+    a row makes it wrap, so a band can drop underneath (it held the v1.7 checklist;
+    now the "Open in Jobs" link). A textarea's
     natural width is wide, so the text column wrapped too, leaving the top line
     empty and the name out from under the finger. The open row's `.body` is sized
     from zero (`flex: 1 1 0`) so only the band ever wraps.
 
-16. **A stale "can't do that" note is worse than no note.** Two of the limitations
+16. **Match a popover to its note, not to an element — and not while the same note
+    still has focus.** A redraw swaps a focused note's input for a fresh copy.
+    Closing the chip popover only when "the element that blurred is the one it
+    opened on" stranded it on screen; closing it whenever that note blurred closed it
+    mid-typing, because the old copy blurs as the new copy takes focus. The rule now:
+    if the element that has focus is the *same note* (same data-id and data-field),
+    nothing has happened. Only the phone's real-tap probes caught the second version —
+    synthetic focus events skip that path.
+
+17. **Closing a row must end the edit inside it first.** The redraw that closes it
+    restores focus to whatever still has it, so typing carried on invisibly in the
+    closed row's field.
+
+18. **A listener that reads `e.target.closest` must survive a target with no
+    `.closest`** — events aimed at the document or window. One unguarded capture
+    listener threw on every such event once the note popover happened to be open.
+
+19. **A stale "can't do that" note is worse than no note.** Two of the limitations
    recorded in this file were technical accidents that had since stopped being true,
    and they were quietly steering sessions away from things that work. If you hit a
    limitation, write down *why* it's true, so the next session can test whether it

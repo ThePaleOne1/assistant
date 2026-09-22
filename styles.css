@@ -47,6 +47,13 @@
      must read as one block, so both take their inset from here rather than
      each carrying its own number — they drifted apart twice that way. */
   --list-gutter: 8px;
+
+  /* Heights of the row's buttons, kept here so a row that grows taller (an
+     open row, or one with several notes) can line each of them up with its
+     first line. The phone overrides these. */
+  --due-h: calc(var(--fs-xs) + 10px);
+  --del-h: 26px;
+  --exp-h: 26px;
 }
 
 :root[data-size="m"] {
@@ -417,7 +424,8 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
   overflow: hidden;
   max-width: 100%;
 }
-.row .note {
+.row .note,
+.job-tasks .note {
   width: 100%;
   min-width: 0;
   color: var(--muted);
@@ -426,7 +434,8 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 }
 .row .note::placeholder { color: transparent; }
 .row:hover .note::placeholder, .row .note:focus::placeholder { color: var(--faint); }
-.row .note.hl { color: var(--hl-text); }
+.row .note.hl,
+.job-tasks .note.hl { color: var(--hl-text); }
 
 /* Date chip. Fixed width on purpose: the note column keeps its left edge at
    the halfway mark no matter what the chip says, and the dates themselves
@@ -438,7 +447,7 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
   width: var(--due-w);
   justify-content: flex-start;
   overflow: hidden;
-  height: calc(var(--fs-xs) + 10px); padding: 0 6px;
+  height: var(--due-h); padding: 0 6px;
   font-size: var(--fs-xs); font-weight: 500; line-height: 1;
   color: var(--faint);
   background: none; border: 0; border-radius: 6px; cursor: pointer;
@@ -460,7 +469,7 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 
 .delbtn {
   display: grid; place-items: center;
-  width: 26px; height: 26px; flex: none;
+  width: var(--del-h); height: var(--del-h); flex: none;
   color: var(--border-2);
   background: none; border: 0; border-radius: 6px; cursor: pointer;
   opacity: 0;
@@ -490,15 +499,55 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .list-empty { text-align: center; padding: 48px 20px; }
 .list-empty p { margin: 4px 0; }
 
+/* ---------- Notes: one per line ----------
+   An item's notes stack in the note column, one highlighter chip per line.
+   The column carries exactly the sizing a single note used to have, so notes
+   still line up down the list; each note inside it fills the column. */
+.row .notes {
+  flex: 0 0 50%; max-width: 50%; min-width: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+}
+/* beats the phone's bare .notewrap rule whatever the order: in a column,
+   a flex basis would size the note's height, not its width */
+.notes > .notewrap { flex: none; width: 100%; max-width: 100%; }
+
+/* A row with several notes (or an open row) grows downward. Its first line
+   is set exactly where a one-line row's is — centred in --row-h — and each
+   button is lined up with it by its own height, so the name, the first
+   note, the date and the × all sit level instead of drifting down the
+   stack. */
+.row.multi, .row.open { align-items: flex-start; }
+.row.multi > .body { align-items: flex-start; }
+.row.multi > .body,
+.row.open > .body { padding-top: calc((var(--row-h) - var(--fs-md) * 1.45 - 2px) / 2); }
+.row.multi > .handle, .row.open > .handle { align-self: flex-start; }
+.row.multi > .duebtn, .row.open > .duebtn { margin-top: calc((var(--row-h) - var(--due-h)) / 2); }
+.row.multi > .delbtn, .row.open > .delbtn { margin-top: calc((var(--row-h) - var(--del-h)) / 2); }
+.row.multi > .expbtn, .row.open > .expbtn { margin-top: calc((var(--row-h) - var(--exp-h)) / 2); }
+
+/* "+ note" — the list's own quiet add-link, shown where you can add one */
+.noteadd {
+  display: none;
+  align-self: flex-start;
+  font: inherit; font-size: var(--fs-sm);
+  color: var(--faint);
+  background: none; border: 0; padding: 2px 5px; margin: 1px 0 0 -1px;
+  border-radius: 6px; cursor: pointer;
+}
+.noteadd:hover { color: var(--accent); background: var(--surface-2); }
+.row.open .noteadd { display: block; }
+
 /* ---------- Open rows ----------
-   An opened row shows everything: name and note wrap onto as many lines as
-   they need, and the checklist sits underneath. Every rule is scoped to
-   .row.open — `open` is a modifier on more than one component, so a bare
-   `.open` rule would reach all of them (trap 1 in CLAUDE.md). */
-.row.open { align-items: flex-start; }
-.row.open .body { flex-wrap: wrap; row-gap: 2px; padding: 7px 0; }
+   An opened row shows everything: name and notes wrap onto as many lines as
+   they need. Every rule is scoped to .row.open — `open` is a modifier on more
+   than one component, so a bare `.open` rule would reach all of them (trap 1
+   in CLAUDE.md). */
+.row.open { align-items: flex-start; flex-wrap: wrap; }
+/* sized from zero so the text column can't wrap itself off the first line
+   (trap 15) — only the row-extra band below ever drops to a line of its own */
+.row.open > .body { flex: 1 1 0; min-width: 0; flex-wrap: wrap; row-gap: 4px; padding-bottom: 7px; }
 .row.open .name,
-.row.open .notewrap { flex: 1 1 100%; max-width: 100%; }
+.row.open .notes { flex: 1 1 100%; max-width: 100%; }
 .row.open .notewrap { display: block; overflow: visible; }
 .row.open .notewrap::after { display: none; }
 .row.open textarea.name,
@@ -507,103 +556,33 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
   resize: none; overflow: hidden;
   white-space: pre-wrap; overflow-wrap: anywhere;
   font: inherit; line-height: 1.4;
-  background: none; border: 0; outline: none;
-  border-radius: 5px;
+  border: 0; outline: none; border-radius: 4px;
   margin: 0;
 }
-.row.open textarea.name { padding: 2px 3px; color: var(--text); }
-.row.open textarea.note { padding: 2px 5px; }
+.row.open textarea.name { padding: 1px 0; color: var(--text); background: none; }
+.row.open textarea.note { padding: 1px 5px; }
 .row.open textarea.name:focus,
 .row.open textarea.note:not(.hl):focus { background: var(--surface-2); }
-/* in an open row, show where a note would go */
 .row.open .note::placeholder { color: var(--faint); }
-.row.open > .handle,
-.row.open > .subbtn,
-.row.open > .duebtn,
-.row.open > .delbtn { margin-top: 6px; }
-.row.open { flex-wrap: wrap; }
-/* Only the checklist band may drop to a line of its own. The text column
-   sizes from zero and grows, so it can never be pushed off the first line
-   by its own natural width (a textarea's is wide) — which left the row's
-   top line empty and moved the name out from under the finger. */
-.row.open > .body { flex: 1 1 0; min-width: 0; }
-.row.open > .row-extra {
-  flex: 1 1 100%; order: 10; min-width: 0;
-  padding: 0 12px 8px 24px;      /* lines up under the name, past the handle */
-}
-.jumpbtn { font-size: var(--fs-sm); padding: 6px 4px 2px; }
+.row.open > .row-extra { flex: 1 1 100%; order: 10; padding: 0 12px 6px 22px; }
 
-/* open / close — the same fixed width on every row, so it can never move
-   the note column */
-.subbtn {
+/* Open / close — the section header's own collapse caret, at row size:
+   pointing right when closed, down when open. */
+.expbtn {
   flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: calc(var(--fs-xs) + 10px);
-  padding: 0;
+  display: grid; place-items: center;
+  width: var(--exp-h); height: var(--exp-h);
   color: var(--faint);
   background: none; border: 0; border-radius: 6px; cursor: pointer;
   opacity: 0;
 }
-.subbtn svg { width: 15px; height: 15px; }
-.row:hover .subbtn, .row.open .subbtn { opacity: 1; }
-.subbtn:hover { color: var(--text); background: var(--surface-2); }
-
-/* A checklist's progress, inside the name's half of the row. The name gives
-   up exactly this chip's width (plus the row's 6px gap), so every note in a
-   section still starts at the same place whether or not its row has a
-   checklist. */
-.row { --sub-w: calc(var(--fs-xs) * 3.3); }
-.row.has-subs:not(.open) .name {
-  flex-basis: calc(50% - var(--sub-w) - 6px);
-  max-width: calc(50% - var(--sub-w) - 6px);
+.expbtn svg {
+  width: calc(var(--fs-xs) * 1.15); height: calc(var(--fs-xs) * 1.15);
+  stroke-width: 2.8; transform: rotate(-90deg); transition: transform .15s ease;
 }
-.subcount {
-  flex: 0 0 var(--sub-w); width: var(--sub-w);
-  height: calc(var(--fs-xs) + 10px);
-  padding: 0;
-  font: inherit; font-size: var(--fs-xs); font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted); background: var(--surface-2);
-  border: 0; border-radius: 999px; cursor: pointer;
-}
-.subcount.done { color: var(--ok); }
-.subcount:hover { color: var(--text); }
-
-/* ---------- Checklists ---------- */
-.subs { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 0; }
-.subrow {
-  display: flex; align-items: center; gap: 8px;
-  min-height: calc(var(--tap) - 8px);
-}
-.subrow input[type=checkbox] {
-  width: 18px; height: 18px; margin: 0 0 0 3px; flex: none;
-  accent-color: var(--accent); cursor: pointer;
-}
-.subrow .subtext {
-  flex: 1 1 auto; min-width: 0; width: auto;
-  margin: 0; padding: 3px 5px;
-  font: inherit; font-size: var(--fs-sm);
-  color: var(--text);
-  background: none; border: 0; border-radius: 5px; outline: none;
-}
-.subrow .subtext:focus { background: var(--surface-2); box-shadow: none; }
-.subrow.done .subtext { color: var(--faint); text-decoration: line-through; }
-.subdel {
-  flex: none; display: grid; place-items: center;
-  width: 26px; height: 26px;
-  color: var(--faint); background: none; border: 0; border-radius: 6px; cursor: pointer;
-  opacity: .45;
-}
-.subdel svg { width: 13px; height: 13px; }
-.subrow:hover .subdel { opacity: 1; }
-.subdel:hover { background: var(--danger-bg); color: var(--danger); }
-.subadd {
-  align-self: flex-start;
-  font: inherit; font-size: var(--fs-sm);
-  color: var(--faint); background: none; border: 0;
-  padding: 5px 4px; border-radius: 6px; cursor: pointer;
-}
-.subadd:hover { color: var(--accent); background: var(--surface-2); }
+.row.open .expbtn svg { transform: none; }
+.row:hover .expbtn, .row.open .expbtn { opacity: 1; }
+.expbtn:hover { color: var(--text); background: var(--surface-2); }
 
 /* ---------- Due dates hidden on this device ----------
    The date column goes, but anything overdue or due soon keeps a coloured
@@ -620,83 +599,96 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 #btn-dates.off .slash { display: inline; }
 #btn-dates.off { color: var(--accent); }
 
-/* ---------- Jobs tab ---------- */
-.jobs-wrap { padding: 12px var(--list-gutter) 0; }
-.jobs-head {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  justify-content: space-between;
-  padding: 0 4px 10px;
-}
-.jobs-head .muted { flex: 1 1 14rem; }
-.jobs-empty { text-align: center; padding: 40px 20px; }
-.jobs-empty p { margin: 4px 0; }
-.jobcard {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  margin-bottom: 8px;
-  overflow: hidden;
-}
+/* ---------- Jobs tab ----------
+   Built from the todo list's own parts so the two tabs read as one app: a
+   job's name sits in a section-style band, its body is a white card like a
+   section's rows, its labels are the tracker grid's small caps, its tasks
+   are row lines carrying the same highlighter notes, and "+ task" is the
+   list's own quiet add-link. */
+.jobs-wrap { padding: 6px 0 0; }
+.jobcard { margin: 14px var(--list-gutter) 0; }
+.jobcard:first-child { margin-top: 6px; }
 .job-head {
-  display: flex; align-items: center; gap: 4px;
-  min-height: var(--tap);
-  padding: 2px 8px 2px 0;
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 10px 0 2px;
+  min-height: calc(var(--tap) + 2px);
+  background: var(--band);
+  border-radius: var(--radius);
   cursor: pointer;
+}
+.jobcard.open .job-head {
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 2px solid var(--border-2);
 }
 .job-head .caret {
   display: grid; place-items: center; flex: none;
   width: var(--tap); height: var(--tap);
-  color: var(--muted); background: none; border: 0; cursor: pointer;
+  color: var(--muted);
+  background: none; border: 0; cursor: pointer;
 }
-.job-head .caret svg { transition: transform .15s ease; transform: rotate(-90deg); }
+.job-head .caret svg {
+  width: calc(var(--fs-hdr) * 1.15); height: calc(var(--fs-hdr) * 1.15);
+  stroke-width: 2.8; transform: rotate(-90deg); transition: transform .15s ease;
+}
 .jobcard.open .job-head .caret svg { transform: none; }
 .job-name {
   flex: 1 1 auto; min-width: 0; width: auto;
-  margin: 0; padding: 5px 4px;
-  font: inherit; font-weight: 600;
+  margin: 0; padding: 4px 2px;
+  font: inherit; font-size: var(--fs-md); font-weight: 700;
   color: var(--text);
-  background: none; border: 0; border-radius: 5px; outline: none;
+  background: none; border: 0; outline: none;
   text-overflow: ellipsis;
 }
-.job-name:focus { background: var(--surface-2); box-shadow: none; }
-.job-prog {
+.job-name:focus { color: var(--accent); box-shadow: none; }
+.job-name::placeholder { color: var(--faint); font-weight: 500; }
+.job-head .count {
+  font-size: var(--fs-xs); font-weight: 600; color: var(--muted);
+  padding: 3px 9px; border-radius: 999px; background: var(--surface);
   flex: none;
-  font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums;
-  color: var(--muted); background: var(--surface-2);
-  padding: 2px 8px; border-radius: 999px;
 }
-.job-prog:empty { display: none; }
-.job-prog.done { color: var(--ok); }
-.jobcard .delbtn { opacity: .5; }
-.jobcard:hover .delbtn { opacity: 1; color: var(--faint); }
-.job-peek {
-  padding: 0 14px 10px calc(var(--tap) + 4px);
-  font-size: var(--fs-sm); color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: pointer;
+.job-head:hover .delbtn { opacity: 1; color: var(--faint); }
+
+.job-body {
+  background: var(--surface);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
-.job-notes {
-  display: block;
-  width: calc(100% - 20px); margin: 2px 10px 0;
-  min-height: 3.2em;
-  padding: 8px 10px;
-  resize: none; overflow: hidden;
-  font: inherit; font-size: var(--fs-sm); line-height: 1.45;
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid transparent; border-radius: 8px; outline: none;
-}
-.job-notes:focus { border-color: var(--accent); }
-.job-notes::placeholder { color: var(--faint); }
 .job-label {
-  padding: 12px 14px 0;
+  padding: 7px 12px;
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: .06em; text-transform: uppercase;
   color: var(--faint);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
-.jobcard .subs { padding: 2px 10px 0; }
-.job-foot { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
+.job-details {
+  display: block; width: 100%;
+  margin: 0; padding: 10px 12px 12px;
+  min-height: 3.6em;
+  resize: none; overflow: hidden;
+  font: inherit; font-size: var(--fs-md); line-height: 1.45;
+  color: var(--text);
+  background: none; border: 0; border-bottom: 1px solid var(--border); outline: none;
+}
+.job-details::placeholder { color: var(--faint); }
+/* focus the way a tracker grid cell does, since the labels come from there */
+.job-details:focus { background: var(--accent-bg); box-shadow: inset 0 0 0 2px var(--accent); }
+
+.job-tasks { display: flex; flex-direction: column; }
+.job-tasks .noteline {
+  display: flex; align-items: center; gap: 4px;
+  min-height: var(--row-h);
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+/* a task line is the whole width of the card, so its chip is too — the
+   todo row's half-width cap on a note doesn't apply here */
+.job-tasks .noteline > .notewrap { flex: 1 1 auto; width: auto; min-width: 0; max-width: none; }
+.job-tasks .noteline:hover .delbtn { opacity: 1; color: var(--faint); }
+.job-tasks .note::placeholder { color: var(--faint); }
+.job-tasks .noteadd { display: block; margin: 4px 7px; }
+.job-foot { display: flex; justify-content: flex-end; padding: 2px 8px 8px; }
 
 /* ---------- Phone: read first, edit second ----------
    A closed row, or a closed job, is for reading: a tap opens it instead of
@@ -706,12 +698,12 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 @media (hover: none) and (pointer: coarse) {
   .row:not(.open) .body input { pointer-events: none; }
   .jobcard:not(.open) .job-name { pointer-events: none; }
-  /* a tap on the row does what this button does, so it only earns its
-     space once there is a checklist to count */
-  .row:not(.open) > .subbtn { display: none; }
-  .row.open > .subbtn { width: var(--tap); height: var(--tap); }
-  .row.open > .row-extra { padding-left: calc(var(--tap) - 8px); }
-  .subdel { opacity: .6; }
+  /* a tap on the row does this button's job, so it only appears on the open
+     row, as the way to close it */
+  .row:not(.open) > .expbtn { display: none; }
+  :root, :root[data-size] { --exp-h: var(--tap); }
+  .row.open > .row-extra { padding-left: calc(var(--tap) - 10px); }
+  .job-tasks .noteline .delbtn { opacity: .5; }
 }
 
 /* ---------- Drag ---------- */
@@ -1191,13 +1183,30 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   cursor: pointer;
   min-height: calc(var(--tap) - 10px);
 }
-.arch-check input {
-  width: 18px; height: 18px;
-  margin: 0;
-  flex: none;
-  accent-color: var(--accent);
+/* Drawn by the app rather than left to the browser, so the box matches the
+   swatches and buttons around it: the same border tone, radius and accent,
+   in light and dark. */
+.arch-check input[type=checkbox] {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; margin: 0; flex: none;
+  border: 1.5px solid var(--border-2); border-radius: 5px;
+  background: var(--surface) center / 12px 12px no-repeat;
   cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
 }
+.arch-check input[type=checkbox]:hover { border-color: var(--faint); }
+.arch-check input[type=checkbox]:checked,
+.arch-check input[type=checkbox]:indeterminate {
+  background-color: var(--accent); border-color: var(--accent);
+}
+.arch-check input[type=checkbox]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-4.9' fill='none' stroke='white' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.arch-check input[type=checkbox]:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='white' stroke-width='1.9' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.arch-check input[type=checkbox]:focus { box-shadow: none; }
+.arch-check input[type=checkbox]:focus-visible { box-shadow: 0 0 0 3px var(--accent-bg); }
 .arch-all { color: var(--muted); }
 
 .arch-item {
@@ -1265,8 +1274,9 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   /* a little more room for fingers in the list itself */
   .row { padding-left: 0; }
   .handle { width: calc(var(--tap) - 8px); }
-  .delbtn { width: var(--tap); height: var(--tap); opacity: .55; }
-  .duebtn { height: calc(var(--tap) - 12px); padding: 0 10px; }
+  :root, :root[data-size] { --del-h: var(--tap); --due-h: calc(var(--tap) - 12px); }
+  .delbtn { opacity: .55; }
+  .duebtn { padding: 0 10px; }
 
   .daybar { padding: 12px 8px 8px; }
   :root { --list-gutter: 6px; }
@@ -1328,4 +1338,9 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
   /* an empty note shouldn't claim a line of its own */
   .row.no-note .notewrap { flex: 0 1 auto; grid-template-columns: auto; }
+
+  /* the note column takes what the name's half leaves, exactly as a single
+     note used to */
+  .row .notes { flex: 1 1 100%; max-width: 100%; }
+  .row.no-note .notes { flex: 0 1 auto; }
 }

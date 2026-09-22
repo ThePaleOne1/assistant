@@ -131,14 +131,13 @@
     <!-- Jobs -->
     <div class="view" id="view-jobs">
       <div class="jobs-wrap">
-        <div class="jobs-head">
-          <span class="muted small">Each job is also one item in the Jobs section of your todo list.</span>
-          <button class="btn small" id="job-add" type="button">+ New job</button>
-        </div>
         <div id="jobs"></div>
-        <div id="jobs-empty" class="jobs-empty" hidden>
+        <div id="jobs-empty" class="list-empty" hidden>
           <p>No jobs yet.</p>
-          <p class="muted">Add one to keep its notes and its tasks together.</p>
+          <p class="muted">Each job keeps its details and its tasks together, and shows in your todo list as one item.</p>
+        </div>
+        <div class="list-foot">
+          <button class="btn ghost small" id="job-add" type="button">+ Job</button>
         </div>
       </div>
       <div class="scroll-pad"></div>

@@ -300,6 +300,9 @@
     render();
     maybeSeed();
     var tagged = migrateTags();
+    var movedLines = migrateSubtasks();
+    if (movedLines) toast(movedLines + ' checklist line' + (movedLines === 1 ? '' : 's') +
+      ' from 1.7 kept as notes on the same items.', null, null, 12000);
     healCategories();
     if (tagged.Claude || tagged.Lunch) {
       toast('Tracker tidied: ' + tagged.Claude + ' rows tagged Claude, ' +
@@ -339,7 +342,7 @@
       : 'Sync status';
     if (s === 'error' && Store.schemaBehind && !paintStatus.warned) {
       paintStatus.warned = true;
-      toast('Database needs updating: run supabase/06_subtasks_jobs.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
+      toast('Database needs updating: run supabase/06_jobs_notes.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
     }
   }
 
@@ -406,7 +409,7 @@
     if (!search) return true;
     var q = search.toLowerCase();
     return (it.name || '').toLowerCase().indexOf(q) >= 0 ||
-           (it.note || '').toLowerCase().indexOf(q) >= 0;
+           noteTexts(it).join(' ').toLowerCase().indexOf(q) >= 0;
   }
 
   /* ============================================================
@@ -522,6 +525,8 @@
     e.preventDefault();
     e.stopPropagation();
     a.blur();
+    // ...and a tap away from the open row closes it too
+    if (tapLeavesOpenRow(e.target)) closeOpenRow();
     // belt and braces: if focus moved regardless, take it back off
     var now = document.activeElement;
     if (now && now !== a && now !== document.body && now.closest &&
@@ -546,8 +551,6 @@
   var svgCaret = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
   var svgBell  = '<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>';
   var svgX     = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-  var svgCollapse = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>';
-  var svgList  = '<svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5.5l1 1 1.8-2M4 11.5l1 1 1.8-2M4 17.5l1 1 1.8-2"/></svg>';
 
   /* The note input sizes itself in CSS: its wrapper's ::after holds the same
      text and sets the column width. All JS has to do is keep them in step. */
@@ -670,12 +673,11 @@
   }
 
   function rowEl(t) {
-    var open = !!openRows[t.id];
-    var subs = t.subtasks || [];
-    var subsDone = subs.filter(function (s) { return s.done; }).length;
+    var open = openRowId === t.id;
+    var extras = extraNotes(t);
     var el = document.createElement('div');
-    el.className = 'row' + (t.note ? '' : ' no-note') + (open ? ' open' : '') +
-      (t.is_job ? ' is-job' : '') + (subs.length ? ' has-subs' : '');
+    el.className = 'row' + (hasAnyNote(t) ? '' : ' no-note') + (open ? ' open' : '') +
+      (t.is_job ? ' is-job' : '') + (extras.length ? ' multi' : '');
     el.dataset.id = t.id;
     el.dataset.kind = 'task';
     el.dataset.due = dueClass(t.due_date);
@@ -697,8 +699,11 @@
     bindText(name, t.id, 'name');
     name.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); addTaskAfter(t); }
-      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); note.focus(); }
-      if (e.key === 'Backspace' && !name.value && !t.note) {
+      if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault();
+        var first = el.querySelector('.note'); if (first) first.focus();
+      }
+      if (e.key === 'Backspace' && !name.value && !hasAnyNote(t)) {
         e.preventDefault();
         name.blur();          // otherwise the row stays on screen after deleting
         deleteItem(t);
@@ -708,28 +713,11 @@
     var sep = document.createElement('span');
     sep.className = 'sep'; sep.textContent = '—';
 
-    var noteWrap = document.createElement('span');
-    noteWrap.className = 'notewrap';
+    var notes = notesEl(t, {
+      scope: '#list', multiline: open, placeholder: '+ note', addLabel: '+ note',
+      onEnter: function () { addTaskAfter(t); }
+    });
 
-    var note = document.createElement(open ? 'textarea' : 'input');
-    if (open) { note.rows = 1; note.addEventListener('input', function () { autoGrow(note); }); }
-    note.className = 'note'; note.value = t.note || '';
-    note.placeholder = '+ note';
-    note.dataset.id = t.id; note.dataset.field = 'note';
-    noteWrap.appendChild(note);
-    noteWrap.dataset.value = note.value || note.placeholder;
-    applyNoteColour(note, t.note_colour);
-    bindText(note, t.id, 'note');
-    note.addEventListener('input', function () {
-      note.__edited = true;
-      syncNoteWidth(note);
-      el.classList.toggle('no-note', !note.value);
-    });
-    note.addEventListener('focus', function () { openNotePop(t, note); });
-    note.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); closeNotePop(); addTaskAfter(t); }
-      if (e.key === 'Escape') { closeNotePop(); note.blur(); }
-    });
     /* A row created with Enter and then abandoned shouldn't stay. Once
        focus leaves the row entirely, if there's nothing in it at all,
        drop it — quietly, since it never really existed. */
@@ -737,46 +725,15 @@
       setTimeout(function () {
         if (el.contains(document.activeElement)) return;
         var cur = Store.byId(t.id);
-        if (!cur || cur.archived_at) return;
-        if ((cur.name || '').trim() || (cur.note || '').trim() || cur.due_date) return;
+        if (!cur || cur.archived_at || cur.is_job) return;
+        if ((cur.name || '').trim() || hasAnyNote(cur) || cur.due_date) return;
         Store.hardDelete(cur.id);
       }, 60);
     }
     name.addEventListener('blur', dropIfBlank);
-    note.addEventListener('blur', dropIfBlank);
+    $$('.note', notes).forEach(function (n) { n.addEventListener('blur', dropIfBlank); });
 
-    note.addEventListener('blur', function () {
-      // only remember notes you actually typed, so tabbing past one
-      // doesn't inflate it up the chip list
-      if (note.__edited) {
-        note.__edited = false;
-        var v = note.value.trim();
-        var cur = Store.byId(t.id);
-        if (v) Store.learnNote(v, cur ? cur.note_colour : null);
-      }
-      // close the chip popover unless focus moved into it
-      setTimeout(function () {
-        var a = document.activeElement;
-        if (!a || !a.closest || !a.closest('#notepop')) {
-          if (notePopFor && notePopFor.input === note) closeNotePop();
-        }
-      }, 0);
-    });
-
-    /* A checklist's progress sits inside the name's half of the row, which
-       gives up exactly the chip's width for it. Anywhere else, it would push
-       this one note out of line with every other note in the column. */
-    if (subs.length && !open) {
-      var count = document.createElement('button');
-      count.type = 'button';
-      count.className = 'subcount' + (subsDone === subs.length ? ' done' : '');
-      count.textContent = subsDone + '/' + subs.length;
-      count.title = subsDone + ' of ' + subs.length + ' done \u2014 show the checklist';
-      count.onclick = function (e) { e.stopPropagation(); toggleRow(t.id, true); };
-      body.append(name, count, sep, noteWrap);
-    } else {
-      body.append(name, sep, noteWrap);
-    }
+    body.append(name, sep, notes);
 
     var due = document.createElement('button');
     due.className = 'duebtn ' + dueClass(t.due_date);
@@ -789,25 +746,23 @@
     del.setAttribute('aria-label', 'Delete');
     del.onclick = function () { deleteItem(t); };
 
-    // open / close. On a desktop it shows on hover; on a phone a tap on the
-    // row opens it, so this only appears on an open row, to close it again.
-    var sub = document.createElement('button');
-    sub.type = 'button';
-    sub.className = 'subbtn';
-    sub.innerHTML = open ? svgCollapse : svgList;
-    sub.title = open ? 'Close' : (subs.length ? 'Show the checklist' : 'Open \u2014 read in full, add a checklist');
-    sub.setAttribute('aria-expanded', open ? 'true' : 'false');
-    sub.onclick = function (e) { e.stopPropagation(); toggleRow(t.id); };
+    // Open / close, drawn exactly like a section's collapse caret: pointing
+    // right when closed, down when open. Desktop shows it on hover; on a
+    // phone a tap on the row opens it, so it only appears on the open row.
+    var exp = document.createElement('button');
+    exp.type = 'button';
+    exp.className = 'expbtn';
+    exp.innerHTML = svgCaret;
+    exp.title = open ? 'Close' : 'Open — read it in full';
+    exp.setAttribute('aria-expanded', open ? 'true' : 'false');
+    exp.onclick = function (e) { e.stopPropagation(); toggleRow(t.id); };
 
-    el.append(handle, body, sub, due, del);
-    // an open row's checklist gets a full-width band of its own underneath,
-    // rather than being squeezed into the text column beside the buttons
-    if (open) el.appendChild(rowExtraEl(t));
+    el.append(handle, body, exp, due, del);
+    if (open && t.is_job) el.appendChild(rowExtraEl(t));
 
     /* On a phone a tap on a row opens it to read, rather than dropping into
        a text field — the fields in a closed row don't take taps at all (see
-       styles.css). Once it's open, tapping a field edits it, and tapping the
-       row anywhere else closes it again.
+       styles.css). Once it's open, tapping a field edits it.
 
        The listener sits on the text column itself, not on the row. Android
        Chrome "adjusts" a fingertip tap: if the element under the finger
@@ -818,7 +773,7 @@
        finger has to be the one listening. */
     function rowTap(e) {
       if (!touchUI()) return;
-      if (e.target.closest('.handle, .duebtn, .delbtn, .subbtn, .row-extra, textarea, button, a')) return;
+      if (e.target.closest('.handle, .duebtn, .delbtn, .expbtn, .row-extra, textarea, button, a')) return;
       if (open && e.target.closest('input')) return;
       e.stopPropagation();
       toggleRow(t.id);
@@ -829,25 +784,58 @@
   }
 
   /* ---------- open rows ----------
-     A row can be opened to read it in full: name and note wrap onto as many
-     lines as they need, and its checklist shows underneath. Which rows are
-     open is per device and never synced: it's where you are reading, not
+     One row can be open at a time, to read it in full: name and notes wrap
+     onto as many lines as they need. It closes again as soon as you tap or
+     click away from it — anywhere that isn't the open row. A tap on another
+     row closes this one and opens that one in the same tap. Which row is
+     open is per device and never synced: it's where you're reading, not
      data. */
-  var openRows = Object.create(null);
+  var openRowId = null;
   var openJobs = Object.create(null);
   var TOUCH_MQ = (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)')) || { matches: false };
   function touchUI() { return !!TOUCH_MQ.matches; }
 
   function toggleRow(id, force) {
-    var on = force == null ? !openRows[id] : !!force;
-    if (on) openRows[id] = true; else delete openRows[id];
+    var on = force == null ? openRowId !== id : !!force;
+    if (on) openRowId = id;
+    else if (openRowId === id) openRowId = null;
     render();
+  }
+  function closeOpenRow() {
+    if (!openRowId) return false;
+    openRowId = null;
+    render();
+    return true;
   }
   function toggleJob(id, force) {
     var on = force == null ? !openJobs[id] : !!force;
     if (on) openJobs[id] = true; else delete openJobs[id];
     render();
   }
+
+  // a tap or click anywhere outside the open row closes it
+  function tapLeavesOpenRow(target) {
+    if (!openRowId || !target || !target.closest) return false;
+    if (target.closest('.row[data-id="' + openRowId + '"]')) return false;
+    // A chip, colour or date in a popover is part of editing the row, so it
+    // keeps the row open; the popover's blank background is just "away".
+    if (target.closest('#notepop, #datepop, #hourspop')) {
+      return !target.closest('button, input, select, label, .chip, .swatch');
+    }
+    // dialogs and the undo toast belong to what you're doing
+    if (target.closest('dialog, #toast')) return false;
+    return true;
+  }
+  document.addEventListener('click', function (e) {
+    if (!tapLeavesOpenRow(e.target)) return;
+    // End any edit inside the row first. The redraw that closes it restores
+    // focus to whatever still has it, so otherwise typing carried on in the
+    // closed row's field — out of sight, in a row you'd just put away.
+    var a = document.activeElement;
+    var row = document.querySelector('#list .row[data-id="' + openRowId + '"]');
+    if (a && row && row.contains(a) && a.blur) a.blur();
+    closeOpenRow();
+  }, false);
 
   function autoGrow(ta) {
     if (!ta || ta.tagName !== 'TEXTAREA' || !ta.isConnected) return;
@@ -857,20 +845,18 @@
 
   function rowExtraEl(t) {
     var box = document.createElement('div');
-    box.className = 'row-extra';
-    box.appendChild(subtasksEl(t, '#list'));
-    if (t.is_job) {
-      var go = document.createElement('button');
-      go.type = 'button'; go.className = 'linkbtn jumpbtn';
-      go.textContent = 'Open in Jobs →';
-      go.onclick = function (e) {
-        e.stopPropagation();
-        openJobs[t.id] = true;
-        switchTab('jobs');
-        scrollToIn('#jobs', t.id);
-      };
-      box.appendChild(go);
-    }
+    box.className = 'row-extra addrow';
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.textContent = 'Open in Jobs →';
+    go.onclick = function (e) {
+      e.stopPropagation();
+      openJobs[t.id] = true;
+      openRowId = null;
+      switchTab('jobs');
+      scrollToIn('#jobs', t.id);
+    };
+    box.appendChild(go);
     return box;
   }
 
@@ -879,136 +865,220 @@
     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
   }
 
-  /* ---------- checklists ----------
-     A checklist lives on its item as a small list of { id, text, done }, and
-     is written back whole. That keeps it inside everything an item already
-     gets for free — sync, offline, archive, restore, undo. Each entry has
-     its own id, so focus and edits follow the right line even while lines
-     are added or removed around it. */
-  function newSubId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  /* ---------- notes: more than one per item ----------
+     The first note is still the item's own `note` / `note_colour`, exactly
+     as it always was — so reminders, search, the Overview and the learned
+     chips keep working untouched. Any further notes live in `extra_notes`, a
+     small list of { id, text, colour }, written back whole. On screen they
+     are all the same: highlighter chips stacked one per line in the note
+     column. A job's tasks on the Jobs tab are this same list.
 
-  function updateSubs(itemId, fn) {
-    var it = Store.byId(itemId);
-    if (!it) return;
-    var list = (it.subtasks || []).map(function (s) { return { id: s.id, text: s.text || '', done: !!s.done }; });
-    fn(list);
-    Store.update(itemId, { subtasks: list });
+     Fields are addressed as 'note' for the first and 'xnote:<id>' for the
+     rest, so focus, the chip popover and edits all follow the right note
+     even while notes are added or removed around it. */
+  function newNoteId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function extraNotes(it) {
+    return ((it && it.extra_notes) || []).map(function (n) {
+      return { id: n.id, text: n.text || '', colour: n.colour || 'none' };
+    });
   }
-  function subIndex(list, id) {
+  function hasAnyNote(it) {
+    return !!((it.note || '').trim() || extraNotes(it).some(function (n) { return n.text.trim(); }));
+  }
+  function noteTexts(it) {
+    return [it.note || ''].concat(extraNotes(it).map(function (n) { return n.text; }))
+      .filter(function (s) { return s.trim(); });
+  }
+  function noteIndex(list, id) {
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return i;
     return -1;
   }
-  function focusSub(scope, itemId, subId, atEnd) {
-    var el = document.querySelector(scope + ' [data-id="' + itemId + '"][data-field="sub:' + subId + '"]');
+  function getNote(it, field) {
+    if (!it) return { text: '', colour: 'none' };
+    if (field === 'note') return { text: it.note || '', colour: it.note_colour || 'none' };
+    var l = extraNotes(it), k = noteIndex(l, field.slice(6));
+    return k >= 0 ? l[k] : { text: '', colour: 'none' };
+  }
+  // patch: { text?, colour? }
+  function setNote(itemId, field, patch) {
+    var it = Store.byId(itemId);
+    if (!it) return;
+    if (field === 'note') {
+      var p = {};
+      if ('text' in patch) p.note = patch.text;
+      if ('colour' in patch) p.note_colour = patch.colour;
+      Store.update(itemId, p);
+      return;
+    }
+    var l = extraNotes(it), k = noteIndex(l, field.slice(6));
+    if (k < 0) return;
+    if ('text' in patch) l[k].text = patch.text;
+    if ('colour' in patch) l[k].colour = patch.colour;
+    Store.update(itemId, { extra_notes: l });
+  }
+  // a new, empty note straight after `field`; returns its field name
+  function addNoteAfter(itemId, field) {
+    var it = Store.byId(itemId);
+    if (!it) return null;
+    var l = extraNotes(it), id = newNoteId();
+    var at = field === 'note' ? 0 : noteIndex(l, field.slice(6)) + 1;
+    l.splice(Math.max(0, at), 0, { id: id, text: '', colour: 'none' });
+    Store.update(itemId, { extra_notes: l });
+    return 'xnote:' + id;
+  }
+  // removes a note; returns the field of the note before it
+  function removeNote(itemId, field) {
+    var it = Store.byId(itemId);
+    if (!it) return null;
+    var l = extraNotes(it);
+    if (field === 'note') {
+      // the first note goes by promoting the next one into its place
+      if (!l.length) { Store.update(itemId, { note: '', note_colour: 'none' }); return null; }
+      var nx = l.shift();
+      Store.update(itemId, { note: nx.text, note_colour: nx.colour, extra_notes: l });
+      return null;
+    }
+    var k = noteIndex(l, field.slice(6));
+    if (k < 0) return null;
+    l.splice(k, 1);
+    Store.update(itemId, { extra_notes: l });
+    return k === 0 ? 'note' : 'xnote:' + l[k - 1].id;
+  }
+  function focusNote(scope, itemId, field, atEnd) {
+    var el = document.querySelector(scope + ' [data-id="' + itemId + '"][data-field="' + field + '"]');
     if (!el) return;
     el.focus();
     try { var n = atEnd ? el.value.length : 0; el.setSelectionRange(n, n); } catch (e) {}
   }
 
-  function subtasksEl(item, scope) {
-    var box = document.createElement('div');
-    box.className = 'subs';
+  /* One note: a highlighter chip in a wrapper that sizes it (see
+     syncNoteWidth). ctx: { scope, multiline, placeholder, onEnter } */
+  function noteInputEl(item, field, ctx) {
+    var cur = getNote(item, field);
+    var wrap = document.createElement('span');
+    wrap.className = 'notewrap';
+    var inp = document.createElement(ctx.multiline ? 'textarea' : 'input');
+    if (ctx.multiline) { inp.rows = 1; inp.addEventListener('input', function () { autoGrow(inp); }); }
+    inp.className = 'note'; inp.value = cur.text;
+    inp.placeholder = ctx.placeholder;
+    inp.dataset.id = item.id; inp.dataset.field = field;
+    wrap.appendChild(inp);
+    wrap.dataset.value = inp.value || inp.placeholder;
+    applyNoteColour(inp, cur.colour);
+    bindText(inp, item.id, field);
 
-    (item.subtasks || []).forEach(function (s) {
-      var line = document.createElement('div');
-      line.className = 'subrow' + (s.done ? ' done' : '');
-
-      var cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.checked = !!s.done;
-      cb.setAttribute('aria-label', 'Done: ' + (s.text || 'task'));
-      cb.onchange = function () {
-        updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l[k].done = cb.checked; });
-      };
-
-      var tx = document.createElement('input');
-      tx.className = 'subtext'; tx.value = s.text || ''; tx.placeholder = 'Task';
-      tx.dataset.id = item.id; tx.dataset.field = 'sub:' + s.id;
-      bindSubText(tx, item.id, s.id);
-      tx.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          if (tx.__flush) tx.__flush();
-          var nid = newSubId();
-          updateSubs(item.id, function (l) { l.splice(subIndex(l, s.id) + 1, 0, { id: nid, text: '', done: false }); });
-          render(); focusSub(scope, item.id, nid);
-        } else if (e.key === 'Backspace' && !tx.value) {
-          e.preventDefault();
-          var prev = null;
-          updateSubs(item.id, function (l) {
-            var k = subIndex(l, s.id);
-            if (k > 0) prev = l[k - 1].id;
-            if (k >= 0) l.splice(k, 1);
-          });
-          render();
-          if (prev) focusSub(scope, item.id, prev, true);
-        }
-      });
-      // a line added and left empty shouldn't stay — but only once focus has
-      // really gone, not because a redraw swapped this input for a new copy
-      tx.addEventListener('blur', function () {
-        setTimeout(function () {
-          var act = document.activeElement;
-          if (act && act.dataset && act.dataset.id === item.id && act.dataset.field === 'sub:' + s.id) return;
-          var cur = Store.byId(item.id);
-          var mine = cur && (cur.subtasks || []).filter(function (z) { return z.id === s.id; })[0];
-          if (mine && !(mine.text || '').trim()) {
-            updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l.splice(k, 1); });
-          }
-        }, 80);
-      });
-
-      var x = document.createElement('button');
-      x.type = 'button'; x.className = 'subdel'; x.innerHTML = svgX;
-      x.setAttribute('aria-label', 'Remove task');
-      x.onclick = function (e) {
-        e.stopPropagation();
-        updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l.splice(k, 1); });
-      };
-
-      line.append(cb, tx, x);
-      box.appendChild(line);
+    inp.addEventListener('input', function () {
+      inp.__edited = true;
+      syncNoteWidth(inp);
+      var r = inp.closest('.row');
+      if (r && field === 'note') r.classList.toggle('no-note', !inp.value && !extraNotes(item).length);
     });
-
-    var add = document.createElement('button');
-    add.type = 'button'; add.className = 'subadd'; add.textContent = '+ Add task';
-    add.onclick = function (e) {
-      e.stopPropagation();
-      var nid = newSubId();
-      updateSubs(item.id, function (l) { l.push({ id: nid, text: '', done: false }); });
-      render(); focusSub(scope, item.id, nid);
-    };
-    box.appendChild(add);
-    return box;
+    inp.addEventListener('focus', function () { openNotePop(Store.byId(item.id) || item, inp); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.shiftKey) {
+        // another note, straight after this one
+        e.preventDefault(); closeNotePop();
+        if (inp.__flush) inp.__flush();
+        var nf = addNoteAfter(item.id, field);
+        render(); if (nf) focusNote(ctx.scope, item.id, nf);
+      } else if (e.key === 'Enter') {
+        e.preventDefault(); closeNotePop();
+        if (ctx.onEnter) ctx.onEnter(field, inp);
+      } else if (e.key === 'Escape') {
+        closeNotePop(); inp.blur();
+      } else if (e.key === 'Backspace' && !inp.value && field !== 'note') {
+        e.preventDefault(); closeNotePop();
+        var prev = removeNote(item.id, field);
+        render(); if (prev) focusNote(ctx.scope, item.id, prev, true);
+      }
+    });
+    inp.addEventListener('blur', function () {
+      // only remember notes you actually typed, so tabbing past one
+      // doesn't inflate it up the chip list
+      if (inp.__edited) {
+        inp.__edited = false;
+        var v = inp.value.trim();
+        if (v) Store.learnNote(v, getNote(Store.byId(item.id), field).colour);
+      }
+      setTimeout(function () {
+        var a = document.activeElement;
+        // A redraw while this note had focus swaps the input for a fresh copy
+        // of the same note, and that copy now has focus. That isn't leaving
+        // the note: keep the chips up, keep the note.
+        var sameNote = !!(a && a.dataset && a.dataset.id === item.id && a.dataset.field === field);
+        var inPop = !!(a && a.closest && a.closest('#notepop'));
+        if (sameNote || inPop) return;
+        // Focus really has gone. Close the chip popover if it belongs to this
+        // note — matched by which note, not by element, since the element it
+        // was opened on may have been swapped out by a redraw.
+        var pi = notePopFor && notePopFor.input;
+        if (pi && (pi === inp || !pi.isConnected ||
+            (pi.dataset.id === item.id && pi.dataset.field === field))) closeNotePop();
+        // An emptied note goes — the first one by letting the next take its
+        // place.
+        var now = Store.byId(item.id);
+        if (!now || getNote(now, field).text.trim()) return;
+        if (field !== 'note' || extraNotes(now).length) removeNote(item.id, field);
+      }, 80);
+    });
+    return wrap;
   }
 
-  // the same rules as bindText: only ever write back what was actually typed
-  function bindSubText(input, itemId, subId) {
-    var timer = null;
-    function commit() {
-      clearTimeout(timer); timer = null;
-      if (!input.__dirty) return;
-      input.__dirty = false;
-      var v = input.value;
-      updateSubs(itemId, function (l) { var k = subIndex(l, subId); if (k >= 0) l[k].text = v; });
-    }
-    input.__flush = commit;
-    input.addEventListener('input', function () {
-      input.__dirty = true;
-      clearTimeout(timer);
-      timer = setTimeout(commit, 350);
+  /* All of an item's notes, one per line, and a way to add another.
+     ctx: { scope, multiline, placeholder, addLabel, onEnter, removable } */
+  function notesEl(item, ctx) {
+    var box = document.createElement('div');
+    box.className = 'notes';
+    var fields = ['note'].concat(extraNotes(item).map(function (n) { return 'xnote:' + n.id; }));
+    fields.forEach(function (f, i) {
+      var line = noteInputEl(item, f, {
+        scope: ctx.scope, multiline: ctx.multiline, onEnter: ctx.onEnter,
+        placeholder: i === 0 ? ctx.placeholder : ''
+      });
+      if (ctx.removable) {
+        var holder = document.createElement('div');
+        holder.className = 'noteline';
+        var x = document.createElement('button');
+        x.type = 'button'; x.className = 'delbtn'; x.innerHTML = svgX;
+        x.setAttribute('aria-label', 'Remove');
+        x.onclick = function (e) {
+          e.stopPropagation();
+          removeNote(item.id, f);
+          render();
+        };
+        holder.append(line, x);
+        box.appendChild(holder);
+      } else {
+        box.appendChild(line);
+      }
     });
-    input.addEventListener('blur', commit);
+    // only once there's a first note to add to: an empty first note already
+    // shows the add prompt as its placeholder
+    if ((item.note || '').trim() || extraNotes(item).length) {
+      var add = document.createElement('button');
+      add.type = 'button'; add.className = 'noteadd';
+      add.textContent = ctx.addLabel;
+      add.onclick = function (e) {
+        e.stopPropagation();
+        var fs = ['note'].concat(extraNotes(Store.byId(item.id) || item).map(function (n) { return 'xnote:' + n.id; }));
+        var nf = addNoteAfter(item.id, fs[fs.length - 1]);
+        render(); if (nf) focusNote(ctx.scope, item.id, nf);
+      };
+      box.appendChild(add);
+    }
+    return box;
   }
 
   /* ============================================================
      Jobs
      ------------------------------------------------------------
-     A job is an ordinary todo item with is_job set: its checklist is the
-     job's tasks, and job_notes holds the notes written about it here. It
-     lives in a "Jobs" section of the todo list that the app creates and
-     keeps track of (prefs.jobs_section_id) — so a job shows in the list as
-     one item with its checklist, exactly as it does on this tab, because
-     it is the same item.
+     A job is an ordinary todo item with is_job set. On this tab it has three
+     parts: its name, Details (job_notes — free writing about the job), and
+     its Tasks, which are simply the item's notes. It lives in a "Jobs"
+     section of the todo list that the app creates and keeps track of
+     (prefs.jobs_section_id), where it shows as one item carrying its tasks
+     as notes — the same data, so an edit in either place is an edit in both.
      ============================================================ */
   function jobsVisible() { var v = $('#view-jobs'); return !!(v && v.classList.contains('active')); }
   function jobsList() { return active().filter(function (i) { return i.is_job && i.kind === 'task'; }); }
@@ -1065,7 +1135,7 @@
     if (!ensureReady()) return null;
     var pos = jobsSectionSlot();
     if (pos == null) return null;
-    var j = Store.newItem({ kind: 'task', is_job: true, name: '', position: pos, subtasks: [], job_notes: '' });
+    var j = Store.newItem({ kind: 'task', is_job: true, name: '', position: pos, extra_notes: [], job_notes: '' });
     openJobs[j.id] = true;
     render();
     var el = document.querySelector('#jobs [data-id="' + j.id + '"][data-field="name"]');
@@ -1082,10 +1152,13 @@
     jobs.forEach(function (j) { box.appendChild(jobEl(j)); });
   }
 
+  /* A job is drawn from the same parts as the todo list, so the two tabs
+     read as one app: a section-style band for the name, a white card below
+     it, the tracker grid's small caps labels, row lines for the tasks with
+     the same highlighter notes, and the list's own quiet "+ task". */
   function jobEl(j) {
     var open = !!openJobs[j.id];
-    var subs = j.subtasks || [];
-    var done = subs.filter(function (s) { return s.done; }).length;
+    var tasks = noteTexts(j);
 
     var el = document.createElement('div');
     el.className = 'jobcard' + (open ? ' open' : '');
@@ -1111,62 +1184,73 @@
         if (el.contains(document.activeElement)) return;
         var cur = Store.byId(j.id);
         if (!cur || cur.archived_at) return;
-        if ((cur.name || '').trim() || (cur.job_notes || '').trim() || (cur.subtasks || []).length) return;
+        if ((cur.name || '').trim() || (cur.job_notes || '').trim() || hasAnyNote(cur)) return;
         Store.hardDelete(cur.id);
       }, 80);
     });
 
-    var prog = document.createElement('span');
-    prog.className = 'job-prog' + (subs.length && done === subs.length ? ' done' : '');
-    prog.textContent = subs.length ? done + '/' + subs.length : '';
+    // the task count, drawn like a section's item count
+    var count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = tasks.length;
+    count.hidden = !tasks.length;
+    count.title = tasks.length + (tasks.length === 1 ? ' task' : ' tasks');
 
     var del = document.createElement('button');
     del.type = 'button'; del.className = 'delbtn'; del.innerHTML = svgX;
     del.setAttribute('aria-label', 'Delete job');
     del.onclick = function (e) { e.stopPropagation(); deleteItem(j); };
 
-    head.append(caret, name, prog, del);
+    head.append(caret, name, count, del);
     head.addEventListener('click', function (e) {
       if (e.target.closest('button')) return;
       if (e.target === name && (open || !touchUI())) return;   // editing the name
       toggleJob(j.id);
     });
     el.appendChild(head);
+    if (!open) return el;
 
-    if (!open) {
-      if (j.job_notes) {
-        var peek = document.createElement('div');
-        peek.className = 'job-peek';
-        peek.textContent = j.job_notes.split('\n')[0];
-        peek.onclick = function () { toggleJob(j.id, true); };
-        el.appendChild(peek);
+    var card = document.createElement('div');
+    card.className = 'job-body';
+
+    var dl = document.createElement('div');
+    dl.className = 'job-label'; dl.textContent = 'Details';
+    var details = document.createElement('textarea');
+    details.className = 'job-details'; details.rows = 2;
+    details.value = j.job_notes || '';
+    details.placeholder = 'Anything about this job — builder, contacts, dates, scope…';
+    details.dataset.id = j.id; details.dataset.field = 'job_notes';
+    bindText(details, j.id, 'job_notes');
+    details.addEventListener('input', function () { autoGrow(details); });
+
+    var tl = document.createElement('div');
+    tl.className = 'job-label'; tl.textContent = 'Tasks';
+    var list = notesEl(j, {
+      scope: '#jobs', multiline: false, placeholder: 'Add a task', addLabel: '+ task',
+      removable: true,
+      // Enter in a task starts the next one, as in any list
+      onEnter: function (field, inp) {
+        if (inp.__flush) inp.__flush();
+        if (!inp.value.trim()) return;
+        var nf = addNoteAfter(j.id, field);
+        render(); if (nf) focusNote('#jobs', j.id, nf);
       }
-      return el;
-    }
-
-    var notes = document.createElement('textarea');
-    notes.className = 'job-notes'; notes.rows = 2;
-    notes.value = j.job_notes || '';
-    notes.placeholder = 'Notes about this job…';
-    notes.dataset.id = j.id; notes.dataset.field = 'job_notes';
-    bindText(notes, j.id, 'job_notes');
-    notes.addEventListener('input', function () { autoGrow(notes); });
-
-    var lbl = document.createElement('div');
-    lbl.className = 'job-label'; lbl.textContent = 'Tasks';
+    });
+    list.classList.add('job-tasks');
 
     var foot = document.createElement('div');
     foot.className = 'job-foot';
     var show = document.createElement('button');
     show.type = 'button'; show.className = 'btn ghost small'; show.textContent = 'Show in Todo';
     show.onclick = function () {
-      openRows[j.id] = true;
+      openRowId = j.id;
       switchTab('todo');
       scrollToIn('#list', j.id);
     };
     foot.appendChild(show);
 
-    el.append(notes, lbl, subtasksEl(j, '#jobs'), foot);
+    card.append(dl, details, tl, list, foot);
+    el.appendChild(card);
     return el;
   }
 
@@ -1212,7 +1296,22 @@
       input.__dirty = false;
 
       var it = Store.byId(id);
-      if (!it || it[field] === input.value) return;
+      if (!it) return;
+
+      // a second or later note: same rules, stored in extra_notes
+      if (field.indexOf('xnote:') === 0) {
+        var was = getNote(it, field);
+        if (was.text === input.value) return;
+        var xp = { text: input.value };
+        if (!was.colour || was.colour === 'none') {
+          var xg = guessColour(input.value);
+          if (xg !== 'none') { xp.colour = xg; applyNoteColour(input, xg); }
+        }
+        if (!input.value) xp.colour = 'none';
+        setNote(id, field, xp);
+        return;
+      }
+      if (it[field] === input.value) return;
 
       var patch = {};
       patch[field] = input.value;
@@ -1342,7 +1441,7 @@
      ============================================================ */
   var notePopFor = null;
   function openNotePop(item, inputEl) {
-    notePopFor = { item: item, input: inputEl };
+    notePopFor = { item: item, input: inputEl, field: inputEl.dataset.field || 'note' };
     var pop = $('#notepop');
     var chips = $('#notepop-chips'), cols = $('#notepop-colours');
     chips.innerHTML = ''; cols.innerHTML = '';
@@ -1375,13 +1474,15 @@
     b.onmousedown = function (e) { e.preventDefault(); };
     b.onclick = function () {
       if (!notePopFor) return;
-      var it = notePopFor.item, inp = notePopFor.input;
+      var it = notePopFor.item, inp = notePopFor.input, fld = notePopFor.field;
       inp.value = text;
+      inp.__dirty = false;          // what's in the box is now saved directly
       syncNoteWidth(inp);
       var col = colour || guessColour(text);
       applyNoteColour(inp, col);
-      inp.closest('.row').classList.remove('no-note');
-      Store.update(it.id, { note: text, note_colour: col });
+      var r = inp.closest('.row');
+      if (r) r.classList.remove('no-note');
+      setNote(it.id, fld, { text: text, colour: col });
       openNotePop(Store.byId(it.id) || it, inp);   // refresh selected swatch
       inp.focus();
       try { inp.setSelectionRange(text.length, text.length); } catch (e) {}
@@ -1396,14 +1497,14 @@
     b.title = c ? c.name : 'No highlight';
     if (c) b.style.background = hexToRgba(c.hex, 0.85);
     var cur = notePopFor && Store.byId(notePopFor.item.id);
-    var curKey = cur ? cur.note_colour : 'none';
+    var curKey = cur ? getNote(cur, notePopFor.field).colour : 'none';
     if ((c && c.key === curKey) || (!c && (!curKey || curKey === 'none'))) b.classList.add('sel');
     b.onmousedown = function (e) { e.preventDefault(); };
     b.onclick = function () {
       if (!notePopFor) return;
       var key = c ? c.key : 'none';
       applyNoteColour(notePopFor.input, key);
-      Store.update(notePopFor.item.id, { note_colour: key });
+      setNote(notePopFor.item.id, notePopFor.field, { colour: key });
       $$('.swatch', $('#notepop')).forEach(function (s) { s.classList.remove('sel'); });
       b.classList.add('sel');
       notePopFor.input.focus();
@@ -1499,6 +1600,8 @@
   }
 
   document.addEventListener('pointerdown', function (e) {
+    // an event aimed at the document or window has no .closest — ignore it
+    if (!e.target || !e.target.closest) return;
     if (!$('#notepop').hidden && !e.target.closest('#notepop') && !e.target.closest('.note')) closeNotePop();
     if (!$('#datepop').hidden && !e.target.closest('#datepop') && !e.target.closest('.duebtn')) closeDatePop();
     if (!$('#hourspop').hidden && !e.target.closest('#hourspop') && !e.target.closest('.c-hrs')) closeHoursPop();
@@ -1903,6 +2006,38 @@
       if (e.category === OLD_CEILED) { Store.updateTime(e.id, { category: NEW_CEILED }); n++; }
     });
     return n;
+  }
+
+  /* ---------- checklists → notes: the v1.8 carry-over ----------
+     v1.7 briefly had a checklist on each item (a `subtasks` list), and it was
+     live on his devices before being replaced by multiple notes. Anything he
+     put in a checklist becomes extra notes on the same item, in order, so
+     nothing entered in 1.7 goes missing. The checklist is then emptied in the
+     same write, which makes this safe to run on every start: an item only
+     has lines to move once. (If `subtasks` is present on a row at all, the
+     column exists, so writing it back empty is safe too.) */
+  function migrateSubtasks() {
+    var moved = 0;
+    Store.items.forEach(function (it) {
+      var subs = it.subtasks;
+      if (!subs || !subs.length) return;
+      var extras = extraNotes(it);
+      subs.forEach(function (s) {
+        var text = (s && s.text || '').trim();
+        if (!text) return;
+        extras.push({ id: newNoteId() + moved, text: text, colour: guessColour(text) });
+        moved++;
+      });
+      // with no first note, the first line moved takes that place
+      var patch = { subtasks: [] };
+      if (!(it.note || '').trim() && extras.length) {
+        var first = extras.shift();
+        patch.note = first.text; patch.note_colour = first.colour;
+      }
+      patch.extra_notes = extras;
+      Store.update(it.id, patch);
+    });
+    return moved;
   }
 
   function migrateTags() {
@@ -2963,6 +3098,7 @@
         else if (!$('#datepop').hidden) closeDatePop();
         else if (!$('#hourspop').hidden) closeHoursPop();
         else if (!$('#searchbar').hidden) $('#search-close').click();
+        else if (openRowId && !isEditingInList()) closeOpenRow();
       }
     });
 
@@ -3629,8 +3765,10 @@
     dueLabelShort: dueLabelShort, dueLabelHtml: dueLabelHtml,
     askConfirm: askConfirm, fillArchive: fillArchive, parseVersion: parseVersion,
     toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, paintStatus: paintStatus,
-    ensureJobsSection: ensureJobsSection, updateSubs: updateSubs, touchUI: touchUI,
-    openRows: function () { return Object.keys(openRows); },
+    ensureJobsSection: ensureJobsSection, touchUI: touchUI, closeOpenRow: closeOpenRow,
+    openRow: function () { return openRowId; },
+    extraNotes: extraNotes, noteTexts: noteTexts, getNote: getNote, setNote: setNote,
+    addNoteAfter: addNoteAfter, removeNote: removeNote, hasAnyNote: hasAnyNote,
     fmtDate: fmtDate, dueClass: dueClass, nextWeekday: nextWeekday,
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log
@@ -3641,6 +3779,7 @@
     maybeMorningRoutine: maybeMorningRoutine, healCategories: healCategories,
     setCatColour: setCatColour,
     classifyTag: classifyTag, migrateTags: migrateTags, renameCategories: renameCategories,
+    migrateSubtasks: migrateSubtasks,
     isBreak: isBreak, dayTotal: dayTotal, dayBreaks: dayBreaks, categories: categories,
     readDisplay: readDisplay, writeDisplay: writeDisplay, applyDisplay: applyDisplay,
     debug: function () {
