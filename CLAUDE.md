@@ -6,7 +6,7 @@ fresh chat can pick up without re-deriving everything.
 Named `CLAUDE.md` because that's the file a Claude session looks for in a project
 folder. Nothing in here is secret — it's safe in the public repo.
 
-**Last verified: 14 September 2026.** Everything below was checked that day rather
+**Last verified: 22 September 2026.** Everything below was checked that day rather
 than carried forward on trust. If you're reading this much later, the facts are
 probably still right but the "verified" claims are only as good as their date.
 
@@ -43,8 +43,22 @@ In daily use and working: todo list, daily tracker, insights, sync between the w
 PC and the phone, and phone reminders. 307 rows of real history imported from his
 spreadsheet.
 
-Current version is **1.6.1** (see `config.js`). The version string shows at the bottom
-of Settings — that's how he checks whether a device has picked up a change.
+**v1.7 added:** checklists inside items, a Jobs tab, tap-to-read / tap-again-to-edit
+on the phone, a per-device toggle to hide due dates, Claude and Lunch tracker
+categories (Lunch is a break and stays out of totals), and CEILED renamed Ceiled.
+
+Current version is **1.7** (see `config.js`).
+
+**v1.7 needs `supabase/06_subtasks_jobs.sql` run in Supabase *before* it is uploaded**
+— items gain three columns, and until they exist every item write is rejected. The
+sync badge says "Needs DB update" if that step was missed; nothing is lost, changes
+wait on the device. Confirm with him that it ran.
+
+**He was stuck on 1.4 until 21 September** — v1.5 and v1.6 never reached GitHub
+(trap 11). Everything from 1.5 to 1.7 goes out in one upload.
+
+The version string shows at the bottom of Settings — that's how he checks whether a
+device has picked up a change.
 
 **There is no outstanding setup work.** Everything the earlier handover listed as
 "do these first" is done and confirmed by him: the `end_time` column exists, v1.4
@@ -54,19 +68,23 @@ colours to his own choices — leave them alone unless he asks.
 
 ### Verification status
 
-Both suites were run on 14 September 2026 against the current code:
+Run on 22 September 2026 against v1.7:
 
 | Suite | Result |
 |---|---|
-| Logic (`tools/test-logic.js`) | **188/188 passed** |
-| DOM (`tools/run-dom-tests.py`) | **183/183 passed at each of three viewports** |
+| Logic (`tools/test-logic.js`) | **217/217 passed** — incl. the tag retag run over the real imported history |
+| DOM (`tools/run-dom-tests.py`) | **240/240 at each of desktop, tablet and phone** |
+| Real-touch probes (phone only) | **36/36** — genuine fingertip taps on an emulated Galaxy A25 |
 
-The DOM suite now runs at desktop (1280px), tablet (700px) and phone (411px at the
-Large text size — his actual handset setup), because the two layout bugs fixed in
-v1.6 were both invisible at desktop width. 42 checks were added in v1.6 covering
-archive selection, the confirmation dialog and the two layout fixes; all 42 were
-confirmed to fail against the previous stylesheet before the fix went in, so they
-are real regression tests rather than decoration.
+Every v1.7 fix was mutation-checked: each was undone in turn and the suite confirmed
+to fail (8 of 8 caught). Two checks that initially passed for the wrong reason were
+found this way and rewritten.
+
+**Not exercised end to end:** Settings → Check for updates (needs the live site and
+a signed-in session — the preview declines it, and that refusal is tested), and the
+"Needs DB update" badge against a real Supabase error (the message matching is
+tested with a faked flag, not a real rejected write). Firefox layout is still only
+proxied by Chromium.
 
 ---
 
@@ -113,9 +131,20 @@ Playwright already installed and configured — `tools/run-dom-tests.py` loads
 name. It exits non-zero on failure, so it can gate an upload.
 
 The DOM runner loads the page three times — 1280px, 700px, and 411px at the Large
-text size, which is his actual phone. **Add layout checks rather than eyeballing a
-screenshot**: a rule that only applies at one breakpoint can be silently dead, and
-a desktop-only run will never say so.
+text size with a touch screen emulated, which is his actual phone. **Add layout
+checks** — a rule that only applies at one breakpoint can be silently dead, and a
+desktop-only run will never say so — **and also look at a screenshot** of anything
+layout-related: see trap 14 for a whole run that was green while measuring the
+wrong layout.
+
+On the phone viewport the runner then does **real-touch probes** (`run_touch_probes`
+in `tools/run-dom-tests.py`): genuine fingertip taps, sent through the DevTools
+protocol with a realistic contact radius. They're needed because whether a tap puts
+focus in a field, where the caret lands, and which element Chrome hands a fingertip
+tap to are all browser default actions that synthetic `.click()` events can't show.
+Every phone interaction rule is checked there: tap to open, tap to edit, tap-out,
+double-tap, fingertip at the edge of a line, building a checklist, the date toggle,
+and the Jobs tab.
 
 Both suites should be green, at every viewport, before uploading.
 
@@ -160,7 +189,7 @@ Work PC      ─┘      • todo + time log          │
 | `sb.js` | Data layer: auth, sync, offline outbox, realtime. |
 | `config.js` | Supabase URL + publishable key, `ALLOW_SIGNUP`, `VERSION`. |
 | `sw.js` | Service worker. Network-first, cache as offline fallback. |
-| `supabase/01–05*.sql` | Schema, reminders, time log, history seed, end-times migration. |
+| `supabase/01–06*.sql` | Schema, reminders, time log, history seed, end-times migration, checklists + jobs columns. |
 | `tools/` | Dev only: mock store, preview builder, both test suites, the DOM runner, seed data. |
 | `Reference/` | The original spreadsheet the history came from. |
 
@@ -174,9 +203,49 @@ app renumbers everything once and carries on.
 `time_entries` holds the tracker. **`hours` is stored as well as `end_time`**, because
 every insight is built on `hours` and the 307 imported rows only ever had durations.
 
+**Checklists and jobs live on items (v1.7), not in tables of their own.** `subtasks`
+is a JSON list of `{id, text, done}` written back whole; `is_job` marks an item as a
+job; `job_notes` is the free-form notes from the Jobs tab. A job *is* its todo item,
+so it syncs, archives, restores and undoes with no extra machinery, and ticking a
+task in the list ticks it on the Jobs tab because it is the same data. The app keeps
+one "Jobs" section header, found by `prefs.jobs_section_id` and created on demand.
+
 ---
 
 ## Design decisions worth not undoing
+
+**Phone: read first, edit second (v1.7).** On a touch screen a closed row's fields
+don't take taps (`pointer-events: none` under `(hover: none) and (pointer: coarse)`):
+a tap opens the row, showing name and note in full as wrapping textareas plus its
+checklist in a full-width band underneath; a tap on a field in an open row edits it;
+a quick double-tap opens and edits in one go. **While editing, a tap anywhere else in
+the list or on the Jobs tab only ends the edit** — it doesn't go through — except on
+popover chips, colours and dates, which are made for mid-edit use. The tab bar and
+top buttons behave normally. Desktop is unchanged: click to edit. Open rows are per
+device and never synced.
+
+**Hidden due dates keep a coloured edge.** The date toggle (app bar, Todo tab only,
+also Settings → This device) is per device. Overdue items get a red left edge and
+due-soon an amber one, costing no width, so hiding dates can't hide a deadline.
+Opening a row shows its date.
+
+**Notes line up in one column — including rows with a checklist.** The checklist's
+progress chip (`.subcount`) sits *inside* the name's half of the row, and that row's
+name gives up exactly the chip's width plus the 6px gap. Anywhere else, the chip
+pushes only that row's note out of line. Tested at every width, dates shown and
+hidden (DOM test 11j).
+
+**Lunch is a break, not work.** `prefs.break_categories` (default `['Lunch']`). A break
+still takes its place in the day's finish-time chain and shows in the day bar, but
+day totals, the target and every Insights card leave it out. The sheet shows it
+beside the total ("Total 7.5h + 1h break").
+
+**The v1.7 retag ran once and must stay once.** Rows mentioning Claude or the AI
+bootcamp became Claude; rows mentioning lunch became Lunch (Claude wins when both).
+It's guarded by `prefs.migrations.tags_v17` so it can never overrule a category he
+later sets by hand. By contrast, CEILED → Ceiled is re-checked on every start,
+because a device still on an old version can write the old spelling, and
+`healCategories()` would otherwise put "CEILED" back in the list.
 
 **Finish times, not durations.** He types when a task finished; the duration is the
 gap since the row above (or the day's start, 7:30 by default, editable per day).
@@ -294,7 +363,37 @@ These all cost real debugging time. Each has a regression test now.
     any, and verifies afterwards. It is also CRLF now, as `.gitattributes` always said
     it should be — `cmd.exe` can lose `goto` labels in LF-only files.
 
-12. **A stale "can't do that" note is worse than no note.** Two of the limitations
+12. **Android Chrome moves a fingertip tap to the nearest thing that responds to
+    taps.** If the element under the finger has no tap handler of its own, Chrome's
+    touch adjustment hands the tap to the closest element that does. With the
+    tap-to-open listener on the row as a whole, taps within about 12px of the start
+    of a line went to the drag handle and did nothing (measured with realistic finger
+    sizes). **Put the listener on the element under the finger** — here, the text
+    column (`.body`). Playwright's own `tap()` is a pinpoint and never triggers this;
+    the probes send fingertip-sized touches through the DevTools protocol instead.
+
+13. **A quick second tap focuses a field but places no caret.** Two taps that close
+    together are a double-click to the browser, and Chrome then focuses the field
+    with no caret in it: the keyboard appears and every key typed is silently
+    dropped. That's what happens when you tap to end an edit and immediately tap to
+    start another, or double-tap a closed row. A click handler with `detail >= 2`
+    places the caret itself.
+
+14. **The preview must carry the viewport meta tag.** `build_preview.py` copies only
+    `<body>`. Without `<meta name="viewport">`, a mobile browser lays the page out
+    980px wide, so a touch-emulated "phone" run was testing the desktop layout with
+    a touch screen — every assertion green, the phone layout never exercised. Only a
+    screenshot showed it. The builder now copies the tag across. **Look at a
+    screenshot of anything layout-related**; a green suite can be measuring the
+    wrong page.
+
+15. **A `flex-wrap` row can push its own text column off the first line.** Opening
+    a row makes it wrap, so the checklist band can drop underneath. A textarea's
+    natural width is wide, so the text column wrapped too, leaving the top line
+    empty and the name out from under the finger. The open row's `.body` is sized
+    from zero (`flex: 1 1 0`) so only the band ever wraps.
+
+16. **A stale "can't do that" note is worse than no note.** Two of the limitations
    recorded in this file were technical accidents that had since stopped being true,
    and they were quietly steering sessions away from things that work. If you hit a
    limitation, write down *why* it's true, so the next session can test whether it
@@ -329,6 +428,10 @@ These all cost real debugging time. Each has a regression test now.
   would do it — he chose to defer it, not drop it.
 - **Multiple lists.** The `lists` table and `list_id` already exist, so it's a UI
   change rather than a migration.
+- **Rows with no note still cap the name at half the row.** On the phone that clips
+  names like "sort out pas…" beside empty space. Letting a note-less row's name use
+  the full width would help the cramped phone view, but it's his "long names clip"
+  rule, so ask before changing it. Tapping the row reads it in full meanwhile.
 
 ## Known issues
 

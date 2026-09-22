@@ -115,6 +115,7 @@
     var d = {};
     try { d = JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') || {}; } catch (e) {}
     if (!d.theme) d.theme = 'auto';
+    if (d.dates !== 'hide') d.dates = 'show';
     if (!d.size) {
       d.size = window.matchMedia('(max-width: 680px), (pointer: coarse)').matches ? 'l' : 'm';
     }
@@ -131,7 +132,9 @@
     var r = document.documentElement;
     if (d.theme === 'auto') delete r.dataset.theme; else r.dataset.theme = d.theme;
     r.dataset.size = d.size;
+    r.dataset.dates = d.dates;
     paintThemeIcon();
+    paintDatesIcon(d.dates);
     // keep the phone's status bar in step with the theme
     var dark = d.theme === 'dark' ||
       (d.theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -145,6 +148,16 @@
   var SUN = '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M4.4 4.4l1.7 1.7M17.9 17.9l1.7 1.7M2.6 12h2.4M19 12h2.4M4.4 19.6l1.7-1.7M17.9 6.1l1.7-1.7"/>';
   var MOON = '<path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.3 8.3 0 1 0 20 14.5z"/>';
   var AUTO = '<circle cx="12" cy="12" r="8.2"/><path d="M12 3.8v16.4a8.2 8.2 0 0 0 0-16.4z" fill="currentColor" stroke="none"/>';
+
+  function paintDatesIcon(dates) {
+    var b = $('#btn-dates');
+    if (!b) return;
+    var off = dates === 'hide';
+    b.classList.toggle('off', off);
+    b.setAttribute('aria-pressed', off ? 'true' : 'false');
+    b.title = off ? 'Due dates hidden on this device — tap to show' : 'Hide due dates on this device';
+  }
+  var DATES = [['show', 'Show'], ['hide', 'Hide']];
 
   function paintThemeIcon() {
     var el = $('#icon-theme');
@@ -286,7 +299,12 @@
     paintStatus(Store.status);
     render();
     maybeSeed();
+    var tagged = migrateTags();
     healCategories();
+    if (tagged.Claude || tagged.Lunch) {
+      toast('Tracker tidied: ' + tagged.Claude + ' rows tagged Claude, ' +
+        tagged.Lunch + ' tagged Lunch' + (tagged.renamed ? ', ' + tagged.renamed + ' renamed to Ceiled' : '') + '.', null, null, 12000);
+    }
     maybeMorningRoutine();
     rememberAppUrl();
     registerSW();
@@ -315,7 +333,14 @@
     p.textContent = s === 'synced' ? 'Synced'
       : s === 'syncing' ? 'Syncing…'
       : s === 'offline' ? (n ? 'Offline · ' + n + ' queued' : 'Offline')
-      : s === 'error' ? 'Retrying' : '…';
+      : s === 'error' ? (Store.schemaBehind ? 'Needs DB update' : 'Retrying') : '…';
+    p.title = (s === 'error' && Store.schemaBehind)
+      ? 'The database is missing a column this version needs. Run the newest file in the supabase folder in the Supabase SQL editor. Nothing is lost; changes are waiting on this device.'
+      : 'Sync status';
+    if (s === 'error' && Store.schemaBehind && !paintStatus.warned) {
+      paintStatus.warned = true;
+      toast('Database needs updating: run supabase/06_subtasks_jobs.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
+    }
   }
 
   /* ---------- first-run starter list ----------
@@ -394,8 +419,8 @@
      this device happens to be selected. */
   function isEditingInList() {
     var a = document.activeElement;
-    if (!a || !a.closest || !a.closest('#list, #sheet')) return false;
-    if (a.tagName !== 'INPUT' && a.tagName !== 'SELECT') return false;
+    if (!a || !a.closest || !a.closest('#list, #sheet, #jobs')) return false;
+    if (a.tagName !== 'INPUT' && a.tagName !== 'SELECT' && a.tagName !== 'TEXTAREA') return false;
     return !!a.__dirty;
   }
 
@@ -458,10 +483,71 @@
   document.addEventListener('click', function () { flushRender(); }, false);
   window.addEventListener('blur', function () { pointerDown = false; });
 
+  /* ---------- tapping out, on a phone ----------
+     On a phone almost every spot in the list is a text field, so a tap meant
+     to put the keyboard away usually landed in another field instead. Now,
+     while you're typing in the list or on the Jobs tab, the next tap there
+     only stops the editing; it doesn't go through to whatever was under it.
+
+     It works on the tap itself (mousedown then click, which a touch screen
+     only produces for a real tap), not on touch contact — so dragging a
+     finger to scroll while typing leaves the keyboard alone. Taps in the
+     note and date popovers, which are made to be used mid-edit, go through
+     as normal, as do the tab bar and the buttons along the top. Desktop is
+     unchanged. */
+  var tapOut = null;
+  function editingField() {
+    var a = document.activeElement;
+    if (!a || !a.matches || !a.closest) return null;
+    if (!a.matches('textarea, input:not([type]), input[type=text]')) return null;
+    return a.closest('#view-todo, #view-jobs') ? a : null;
+  }
+  document.addEventListener('mousedown', function (e) {
+    tapOut = null;
+    if (!touchUI()) return;
+    var a = editingField();
+    if (!a || e.target === a) return;
+    var t = e.target;
+    if (!t.closest || !t.closest('#view-todo, #view-jobs, #fab')) return;
+    // Chips, colours and dates in the popovers are made to be used mid-edit,
+    // so they go through. (A tap on a popover's blank background already ends
+    // the edit without help: it can't take focus, so the browser drops it.)
+    if (t.closest('#notepop, #datepop, #hourspop')) return;
+    e.preventDefault();          // keeps the tapped field from taking focus
+    tapOut = a;
+  }, true);
+  document.addEventListener('click', function (e) {
+    if (!tapOut) return;
+    var a = tapOut; tapOut = null;
+    e.preventDefault();
+    e.stopPropagation();
+    a.blur();
+    // belt and braces: if focus moved regardless, take it back off
+    var now = document.activeElement;
+    if (now && now !== a && now !== document.body && now.closest &&
+        now.closest('#view-todo, #view-jobs')) now.blur();
+  }, true);
+
+  /* A quick second tap — the tap straight after one that stopped an edit,
+     or a double-tap on a closed row to open it and edit in one go — reaches
+     the browser as the second half of a double-click. Chrome then focuses
+     the field but places no caret in it, so the keyboard appears and every
+     key typed is silently dropped. Put the caret there ourselves. */
+  document.addEventListener('click', function (e) {
+    if (!touchUI() || e.detail < 2) return;
+    var t = e.target;
+    if (!t || !t.matches || !t.matches('textarea, input:not([type]), input[type=text]')) return;
+    if (!t.closest('#view-todo, #view-jobs')) return;
+    if (document.activeElement !== t) t.focus();
+    try { var n = t.value.length; t.setSelectionRange(n, n); } catch (err) {}
+  }, false);
+
   var svgGrip  = '<svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.1"/><circle cx="15" cy="6" r="1.1"/><circle cx="9" cy="12" r="1.1"/><circle cx="15" cy="12" r="1.1"/><circle cx="9" cy="18" r="1.1"/><circle cx="15" cy="18" r="1.1"/></svg>';
   var svgCaret = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
   var svgBell  = '<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>';
   var svgX     = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var svgCollapse = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>';
+  var svgList  = '<svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5.5l1 1 1.8-2M4 11.5l1 1 1.8-2M4 17.5l1 1 1.8-2"/></svg>';
 
   /* The note input sizes itself in CSS: its wrapper's ::after holds the same
      text and sets the column width. All JS has to do is keep them in step. */
@@ -534,6 +620,8 @@
       list.appendChild(none);
     }
 
+    if (jobsVisible()) renderJobs();
+    $$('#list textarea, #jobs textarea').forEach(autoGrow);
     restoreFocus(focus);
     if ($('#view-overview').classList.contains('active')) renderOverview();
     if ($('#view-time').classList.contains('active')) {
@@ -582,10 +670,15 @@
   }
 
   function rowEl(t) {
+    var open = !!openRows[t.id];
+    var subs = t.subtasks || [];
+    var subsDone = subs.filter(function (s) { return s.done; }).length;
     var el = document.createElement('div');
-    el.className = 'row' + (t.note ? '' : ' no-note');
+    el.className = 'row' + (t.note ? '' : ' no-note') + (open ? ' open' : '') +
+      (t.is_job ? ' is-job' : '') + (subs.length ? ' has-subs' : '');
     el.dataset.id = t.id;
     el.dataset.kind = 'task';
+    el.dataset.due = dueClass(t.due_date);
 
     var handle = document.createElement('button');
     handle.className = 'handle'; handle.innerHTML = svgGrip;
@@ -594,7 +687,10 @@
     var body = document.createElement('div');
     body.className = 'body';
 
-    var name = document.createElement('input');
+    // An open row shows its text in full, so its fields become textareas that
+    // wrap and grow; a closed row keeps single-line inputs that clip.
+    var name = document.createElement(open ? 'textarea' : 'input');
+    if (open) { name.rows = 1; name.addEventListener('input', function () { autoGrow(name); }); }
     name.className = 'name'; name.value = t.name || '';
     name.placeholder = 'New item';
     name.dataset.id = t.id; name.dataset.field = 'name';
@@ -615,7 +711,8 @@
     var noteWrap = document.createElement('span');
     noteWrap.className = 'notewrap';
 
-    var note = document.createElement('input');
+    var note = document.createElement(open ? 'textarea' : 'input');
+    if (open) { note.rows = 1; note.addEventListener('input', function () { autoGrow(note); }); }
     note.className = 'note'; note.value = t.note || '';
     note.placeholder = '+ note';
     note.dataset.id = t.id; note.dataset.field = 'note';
@@ -666,7 +763,20 @@
       }, 0);
     });
 
-    body.append(name, sep, noteWrap);
+    /* A checklist's progress sits inside the name's half of the row, which
+       gives up exactly the chip's width for it. Anywhere else, it would push
+       this one note out of line with every other note in the column. */
+    if (subs.length && !open) {
+      var count = document.createElement('button');
+      count.type = 'button';
+      count.className = 'subcount' + (subsDone === subs.length ? ' done' : '');
+      count.textContent = subsDone + '/' + subs.length;
+      count.title = subsDone + ' of ' + subs.length + ' done \u2014 show the checklist';
+      count.onclick = function (e) { e.stopPropagation(); toggleRow(t.id, true); };
+      body.append(name, count, sep, noteWrap);
+    } else {
+      body.append(name, sep, noteWrap);
+    }
 
     var due = document.createElement('button');
     due.className = 'duebtn ' + dueClass(t.due_date);
@@ -679,7 +789,384 @@
     del.setAttribute('aria-label', 'Delete');
     del.onclick = function () { deleteItem(t); };
 
-    el.append(handle, body, due, del);
+    // open / close. On a desktop it shows on hover; on a phone a tap on the
+    // row opens it, so this only appears on an open row, to close it again.
+    var sub = document.createElement('button');
+    sub.type = 'button';
+    sub.className = 'subbtn';
+    sub.innerHTML = open ? svgCollapse : svgList;
+    sub.title = open ? 'Close' : (subs.length ? 'Show the checklist' : 'Open \u2014 read in full, add a checklist');
+    sub.setAttribute('aria-expanded', open ? 'true' : 'false');
+    sub.onclick = function (e) { e.stopPropagation(); toggleRow(t.id); };
+
+    el.append(handle, body, sub, due, del);
+    // an open row's checklist gets a full-width band of its own underneath,
+    // rather than being squeezed into the text column beside the buttons
+    if (open) el.appendChild(rowExtraEl(t));
+
+    /* On a phone a tap on a row opens it to read, rather than dropping into
+       a text field — the fields in a closed row don't take taps at all (see
+       styles.css). Once it's open, tapping a field edits it, and tapping the
+       row anywhere else closes it again.
+
+       The listener sits on the text column itself, not on the row. Android
+       Chrome "adjusts" a fingertip tap: if the element under the finger
+       doesn't respond to taps of its own, the tap is handed to the nearest
+       one that does — here, the drag handle beside the name. With the
+       listener on the row as a whole, a tap near the left of the text
+       quietly went to the handle and did nothing. The element under the
+       finger has to be the one listening. */
+    function rowTap(e) {
+      if (!touchUI()) return;
+      if (e.target.closest('.handle, .duebtn, .delbtn, .subbtn, .row-extra, textarea, button, a')) return;
+      if (open && e.target.closest('input')) return;
+      e.stopPropagation();
+      toggleRow(t.id);
+    }
+    body.addEventListener('click', rowTap);
+    el.addEventListener('click', rowTap);
+    return el;
+  }
+
+  /* ---------- open rows ----------
+     A row can be opened to read it in full: name and note wrap onto as many
+     lines as they need, and its checklist shows underneath. Which rows are
+     open is per device and never synced: it's where you are reading, not
+     data. */
+  var openRows = Object.create(null);
+  var openJobs = Object.create(null);
+  var TOUCH_MQ = (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)')) || { matches: false };
+  function touchUI() { return !!TOUCH_MQ.matches; }
+
+  function toggleRow(id, force) {
+    var on = force == null ? !openRows[id] : !!force;
+    if (on) openRows[id] = true; else delete openRows[id];
+    render();
+  }
+  function toggleJob(id, force) {
+    var on = force == null ? !openJobs[id] : !!force;
+    if (on) openJobs[id] = true; else delete openJobs[id];
+    render();
+  }
+
+  function autoGrow(ta) {
+    if (!ta || ta.tagName !== 'TEXTAREA' || !ta.isConnected) return;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+
+  function rowExtraEl(t) {
+    var box = document.createElement('div');
+    box.className = 'row-extra';
+    box.appendChild(subtasksEl(t, '#list'));
+    if (t.is_job) {
+      var go = document.createElement('button');
+      go.type = 'button'; go.className = 'linkbtn jumpbtn';
+      go.textContent = 'Open in Jobs →';
+      go.onclick = function (e) {
+        e.stopPropagation();
+        openJobs[t.id] = true;
+        switchTab('jobs');
+        scrollToIn('#jobs', t.id);
+      };
+      box.appendChild(go);
+    }
+    return box;
+  }
+
+  function scrollToIn(scope, id) {
+    var el = document.querySelector(scope + ' [data-id="' + id + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  }
+
+  /* ---------- checklists ----------
+     A checklist lives on its item as a small list of { id, text, done }, and
+     is written back whole. That keeps it inside everything an item already
+     gets for free — sync, offline, archive, restore, undo. Each entry has
+     its own id, so focus and edits follow the right line even while lines
+     are added or removed around it. */
+  function newSubId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function updateSubs(itemId, fn) {
+    var it = Store.byId(itemId);
+    if (!it) return;
+    var list = (it.subtasks || []).map(function (s) { return { id: s.id, text: s.text || '', done: !!s.done }; });
+    fn(list);
+    Store.update(itemId, { subtasks: list });
+  }
+  function subIndex(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return i;
+    return -1;
+  }
+  function focusSub(scope, itemId, subId, atEnd) {
+    var el = document.querySelector(scope + ' [data-id="' + itemId + '"][data-field="sub:' + subId + '"]');
+    if (!el) return;
+    el.focus();
+    try { var n = atEnd ? el.value.length : 0; el.setSelectionRange(n, n); } catch (e) {}
+  }
+
+  function subtasksEl(item, scope) {
+    var box = document.createElement('div');
+    box.className = 'subs';
+
+    (item.subtasks || []).forEach(function (s) {
+      var line = document.createElement('div');
+      line.className = 'subrow' + (s.done ? ' done' : '');
+
+      var cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!s.done;
+      cb.setAttribute('aria-label', 'Done: ' + (s.text || 'task'));
+      cb.onchange = function () {
+        updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l[k].done = cb.checked; });
+      };
+
+      var tx = document.createElement('input');
+      tx.className = 'subtext'; tx.value = s.text || ''; tx.placeholder = 'Task';
+      tx.dataset.id = item.id; tx.dataset.field = 'sub:' + s.id;
+      bindSubText(tx, item.id, s.id);
+      tx.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (tx.__flush) tx.__flush();
+          var nid = newSubId();
+          updateSubs(item.id, function (l) { l.splice(subIndex(l, s.id) + 1, 0, { id: nid, text: '', done: false }); });
+          render(); focusSub(scope, item.id, nid);
+        } else if (e.key === 'Backspace' && !tx.value) {
+          e.preventDefault();
+          var prev = null;
+          updateSubs(item.id, function (l) {
+            var k = subIndex(l, s.id);
+            if (k > 0) prev = l[k - 1].id;
+            if (k >= 0) l.splice(k, 1);
+          });
+          render();
+          if (prev) focusSub(scope, item.id, prev, true);
+        }
+      });
+      // a line added and left empty shouldn't stay — but only once focus has
+      // really gone, not because a redraw swapped this input for a new copy
+      tx.addEventListener('blur', function () {
+        setTimeout(function () {
+          var act = document.activeElement;
+          if (act && act.dataset && act.dataset.id === item.id && act.dataset.field === 'sub:' + s.id) return;
+          var cur = Store.byId(item.id);
+          var mine = cur && (cur.subtasks || []).filter(function (z) { return z.id === s.id; })[0];
+          if (mine && !(mine.text || '').trim()) {
+            updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l.splice(k, 1); });
+          }
+        }, 80);
+      });
+
+      var x = document.createElement('button');
+      x.type = 'button'; x.className = 'subdel'; x.innerHTML = svgX;
+      x.setAttribute('aria-label', 'Remove task');
+      x.onclick = function (e) {
+        e.stopPropagation();
+        updateSubs(item.id, function (l) { var k = subIndex(l, s.id); if (k >= 0) l.splice(k, 1); });
+      };
+
+      line.append(cb, tx, x);
+      box.appendChild(line);
+    });
+
+    var add = document.createElement('button');
+    add.type = 'button'; add.className = 'subadd'; add.textContent = '+ Add task';
+    add.onclick = function (e) {
+      e.stopPropagation();
+      var nid = newSubId();
+      updateSubs(item.id, function (l) { l.push({ id: nid, text: '', done: false }); });
+      render(); focusSub(scope, item.id, nid);
+    };
+    box.appendChild(add);
+    return box;
+  }
+
+  // the same rules as bindText: only ever write back what was actually typed
+  function bindSubText(input, itemId, subId) {
+    var timer = null;
+    function commit() {
+      clearTimeout(timer); timer = null;
+      if (!input.__dirty) return;
+      input.__dirty = false;
+      var v = input.value;
+      updateSubs(itemId, function (l) { var k = subIndex(l, subId); if (k >= 0) l[k].text = v; });
+    }
+    input.__flush = commit;
+    input.addEventListener('input', function () {
+      input.__dirty = true;
+      clearTimeout(timer);
+      timer = setTimeout(commit, 350);
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  /* ============================================================
+     Jobs
+     ------------------------------------------------------------
+     A job is an ordinary todo item with is_job set: its checklist is the
+     job's tasks, and job_notes holds the notes written about it here. It
+     lives in a "Jobs" section of the todo list that the app creates and
+     keeps track of (prefs.jobs_section_id) — so a job shows in the list as
+     one item with its checklist, exactly as it does on this tab, because
+     it is the same item.
+     ============================================================ */
+  function jobsVisible() { var v = $('#view-jobs'); return !!(v && v.classList.contains('active')); }
+  function jobsList() { return active().filter(function (i) { return i.is_job && i.kind === 'task'; }); }
+
+  /* The Jobs section header, making it if it's missing. A new one goes just
+     above the first section, never at the very top of the list: anything
+     sitting above the first header belongs to no section, and a header put
+     in front of it would quietly adopt it. */
+  function ensureJobsSection(depth) {
+    var p = Store.settings.prefs;
+    var h = p.jobs_section_id ? Store.byId(p.jobs_section_id) : null;
+    if (h && !h.archived_at && h.kind === 'header') return h;
+
+    var list = active();
+    var fi = -1;
+    for (var i = 0; i < list.length; i++) if (list[i].kind === 'header') { fi = i; break; }
+    var pos;
+    if (fi < 0) {
+      var last = list[list.length - 1];
+      pos = last ? last.position + 1024 : 1024;
+    } else {
+      var ps = positionsBetween(fi > 0 ? list[fi - 1].position : null, list[fi].position, 1);
+      if (!ps) {
+        if ((depth || 0) > 2) return null;
+        renormalise(); return ensureJobsSection((depth || 0) + 1);
+      }
+      pos = ps[0];
+    }
+    h = Store.newItem({ kind: 'header', name: 'Jobs', position: pos });
+    p.jobs_section_id = h.id;
+    Store.saveSettings({ prefs: p });
+    return h;
+  }
+
+  // a position at the end of the Jobs section
+  function jobsSectionSlot(depth) {
+    var h = ensureJobsSection();
+    if (!h) return null;
+    var list = active();
+    var i = 0;
+    while (i < list.length && list[i].id !== h.id) i++;
+    var j = i + 1;
+    while (j < list.length && list[j].kind !== 'header') j++;
+    var prev = list[j - 1], next = list[j] || null;
+    var ps = positionsBetween(prev.position, next ? next.position : null, 1);
+    if (!ps) {
+      if ((depth || 0) > 2) return null;
+      renormalise(); return jobsSectionSlot((depth || 0) + 1);
+    }
+    return ps[0];
+  }
+
+  function createJob() {
+    if (!ensureReady()) return null;
+    var pos = jobsSectionSlot();
+    if (pos == null) return null;
+    var j = Store.newItem({ kind: 'task', is_job: true, name: '', position: pos, subtasks: [], job_notes: '' });
+    openJobs[j.id] = true;
+    render();
+    var el = document.querySelector('#jobs [data-id="' + j.id + '"][data-field="name"]');
+    if (el) { el.focus(); if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); }
+    return j;
+  }
+
+  function renderJobs() {
+    var box = $('#jobs');
+    if (!box) return;
+    box.innerHTML = '';
+    var jobs = jobsList();
+    $('#jobs-empty').hidden = jobs.length > 0;
+    jobs.forEach(function (j) { box.appendChild(jobEl(j)); });
+  }
+
+  function jobEl(j) {
+    var open = !!openJobs[j.id];
+    var subs = j.subtasks || [];
+    var done = subs.filter(function (s) { return s.done; }).length;
+
+    var el = document.createElement('div');
+    el.className = 'jobcard' + (open ? ' open' : '');
+    el.dataset.id = j.id;
+
+    var head = document.createElement('div');
+    head.className = 'job-head';
+
+    var caret = document.createElement('button');
+    caret.type = 'button'; caret.className = 'caret'; caret.innerHTML = svgCaret;
+    caret.setAttribute('aria-label', open ? 'Close job' : 'Open job');
+    caret.setAttribute('aria-expanded', open ? 'true' : 'false');
+    caret.onclick = function (e) { e.stopPropagation(); toggleJob(j.id); };
+
+    var name = document.createElement('input');
+    name.className = 'job-name'; name.value = j.name || ''; name.placeholder = 'Job name';
+    name.dataset.id = j.id; name.dataset.field = 'name';
+    bindText(name, j.id, 'name');
+    name.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); name.blur(); } });
+    // a job started and abandoned with nothing in it shouldn't linger
+    name.addEventListener('blur', function () {
+      setTimeout(function () {
+        if (el.contains(document.activeElement)) return;
+        var cur = Store.byId(j.id);
+        if (!cur || cur.archived_at) return;
+        if ((cur.name || '').trim() || (cur.job_notes || '').trim() || (cur.subtasks || []).length) return;
+        Store.hardDelete(cur.id);
+      }, 80);
+    });
+
+    var prog = document.createElement('span');
+    prog.className = 'job-prog' + (subs.length && done === subs.length ? ' done' : '');
+    prog.textContent = subs.length ? done + '/' + subs.length : '';
+
+    var del = document.createElement('button');
+    del.type = 'button'; del.className = 'delbtn'; del.innerHTML = svgX;
+    del.setAttribute('aria-label', 'Delete job');
+    del.onclick = function (e) { e.stopPropagation(); deleteItem(j); };
+
+    head.append(caret, name, prog, del);
+    head.addEventListener('click', function (e) {
+      if (e.target.closest('button')) return;
+      if (e.target === name && (open || !touchUI())) return;   // editing the name
+      toggleJob(j.id);
+    });
+    el.appendChild(head);
+
+    if (!open) {
+      if (j.job_notes) {
+        var peek = document.createElement('div');
+        peek.className = 'job-peek';
+        peek.textContent = j.job_notes.split('\n')[0];
+        peek.onclick = function () { toggleJob(j.id, true); };
+        el.appendChild(peek);
+      }
+      return el;
+    }
+
+    var notes = document.createElement('textarea');
+    notes.className = 'job-notes'; notes.rows = 2;
+    notes.value = j.job_notes || '';
+    notes.placeholder = 'Notes about this job…';
+    notes.dataset.id = j.id; notes.dataset.field = 'job_notes';
+    bindText(notes, j.id, 'job_notes');
+    notes.addEventListener('input', function () { autoGrow(notes); });
+
+    var lbl = document.createElement('div');
+    lbl.className = 'job-label'; lbl.textContent = 'Tasks';
+
+    var foot = document.createElement('div');
+    foot.className = 'job-foot';
+    var show = document.createElement('button');
+    show.type = 'button'; show.className = 'btn ghost small'; show.textContent = 'Show in Todo';
+    show.onclick = function () {
+      openRows[j.id] = true;
+      switchTab('todo');
+      scrollToIn('#list', j.id);
+    };
+    foot.appendChild(show);
+
+    el.append(notes, lbl, subtasksEl(j, '#jobs'), foot);
     return el;
   }
 
@@ -752,7 +1239,7 @@
   }
 
   function flushAllText() {
-    $$('#list input, #sheet input').forEach(function (el) {
+    $$('#list input, #list textarea, #sheet input, #jobs input, #jobs textarea').forEach(function (el) {
       if (typeof el.__flush === 'function') el.__flush();
     });
   }
@@ -761,11 +1248,18 @@
   function captureFocus() {
     var a = document.activeElement;
     if (!a || !a.dataset || !a.dataset.id || !a.dataset.field) return null;
-    return { id: a.dataset.id, field: a.dataset.field, start: a.selectionStart, end: a.selectionEnd };
+    var scope = a.closest && a.closest('#list, #jobs, #sheet');
+    return { id: a.dataset.id, field: a.dataset.field, start: a.selectionStart, end: a.selectionEnd,
+             scope: scope ? '#' + scope.id : null };
   }
+  /* Scoped to the view the field was in. A job's name is one value shown in
+     two places — its todo row and its Jobs card — with the same data-id and
+     data-field; unscoped, this could hand focus to the copy in the hidden
+     view, and the keyboard would vanish mid-word. */
   function restoreFocus(f) {
     if (!f) return;
-    var el = document.querySelector('[data-id="' + f.id + '"][data-field="' + f.field + '"]');
+    var root = (f.scope && document.querySelector(f.scope)) || document;
+    var el = root.querySelector('[data-id="' + f.id + '"][data-field="' + f.field + '"]');
     if (!el) return;
     el.focus();
     try { el.setSelectionRange(f.start, f.end); } catch (e) {}
@@ -1327,7 +1821,8 @@
      recognisable; anything you add later gets one from the pool. */
   var CAT_COLOURS = {
     'Tenders': '#4f7cff',
-    'CEILED':  '#12b886',
+    'Ceiled':  '#12b886',
+    'CEILED':  '#12b886',   // the old spelling, until every entry is renamed
     'Admin':   '#f08c00',
     'Misc':    '#8d95a3',
     'Lunch':   '#adb5bd',
@@ -1351,7 +1846,88 @@
   }
 
   function categories() {
-    return (Store.settings.prefs.categories || ['Tenders', 'CEILED', 'Admin', 'Misc']);
+    return (Store.settings.prefs.categories || ['Tenders', 'Ceiled', 'Admin', 'Misc', 'Claude', 'Lunch']);
+  }
+
+  /* ---------- breaks ----------
+     Categories that are time away from work. They still take their place
+     in the day — the finish-time chain runs through them, and they show in
+     the day bar — but day totals, the target and every Insights card leave
+     them out, otherwise lunch reads as time worked. */
+  function breakCategories() {
+    return Store.settings.prefs.break_categories || ['Lunch'];
+  }
+  function isBreak(cat) { return breakCategories().indexOf(cat) >= 0; }
+
+  /* ---------- tags: the v1.7 tidy-up ----------
+     Two separate jobs, deliberately treated differently.
+
+     The rename CEILED -> Ceiled is safe to repeat, and is: it runs on
+     every start. A device still on an older version can write the old
+     spelling until it updates, and healCategories() would otherwise see
+     "CEILED" in use and put it straight back in the list.
+
+     The Claude / Lunch retag runs ONCE, guarded by a flag in settings.
+     It's a guess from the words in the task, and it must never overrule
+     a choice made by hand afterwards — "lunch meeting with the builder"
+     filed under Tenders on purpose has to stay there.
+
+     Claude wins over Lunch: "lunch / work on claude" is Claude time. */
+  var OLD_CEILED = 'CEILED', NEW_CEILED = 'Ceiled';
+
+  function classifyTag(task) {
+    var t = task || '';
+    if (/claude/i.test(t) || /\bai\s*boot\s*camp\b/i.test(t)) return 'Claude';
+    if (/\blunch\b/i.test(t)) return 'Lunch';
+    return null;
+  }
+
+  function renameCategories() {
+    var p = Store.settings.prefs, changed = false;
+    if (p.categories && p.categories.indexOf(OLD_CEILED) >= 0) {
+      var list = p.categories.map(function (c) { return c === OLD_CEILED ? NEW_CEILED : c; });
+      p.categories = list.filter(function (c, i) { return list.indexOf(c) === i; });
+      changed = true;
+    }
+    if (p.category_colours && p.category_colours[OLD_CEILED]) {
+      p.category_colours = Object.assign({}, p.category_colours);
+      if (!p.category_colours[NEW_CEILED]) p.category_colours[NEW_CEILED] = p.category_colours[OLD_CEILED];
+      delete p.category_colours[OLD_CEILED];
+      changed = true;
+    }
+    if (p.stage_category === OLD_CEILED) { p.stage_category = NEW_CEILED; changed = true; }
+    if (changed) Store.saveSettings({ prefs: p });
+
+    var n = 0;
+    Store.time.forEach(function (e) {
+      if (e.category === OLD_CEILED) { Store.updateTime(e.id, { category: NEW_CEILED }); n++; }
+    });
+    return n;
+  }
+
+  function migrateTags() {
+    var renamed = renameCategories();
+    var p = Store.settings.prefs;
+    var done = p.migrations && p.migrations.tags_v17;
+    var counts = { Claude: 0, Lunch: 0, renamed: renamed };
+    if (done) return counts;
+
+    // make sure both new categories exist before anything is filed under them
+    var cats = (p.categories || categories()).slice();
+    ['Claude', 'Lunch'].forEach(function (c) { if (cats.indexOf(c) < 0) cats.push(c); });
+    p.categories = cats;
+
+    Store.time.forEach(function (e) {
+      var tag = classifyTag(e.task);
+      if (tag && e.category !== tag) {
+        Store.updateTime(e.id, { category: tag });
+        counts[tag]++;
+      }
+    });
+
+    p.migrations = Object.assign({}, p.migrations || {}, { tags_v17: true });
+    Store.saveSettings({ prefs: p });
+    return counts;
   }
 
   /* A category removed from Settings by accident shouldn't strand the
@@ -1569,7 +2145,14 @@
       .sort(function (a, b) { return a.position - b.position; });
   }
   function dayTotal(dateStr) {
-    return dayEntries(dateStr).reduce(function (s, e) { return s + (Number(e.hours) || 0); }, 0);
+    return dayEntries(dateStr).reduce(function (s, e) {
+      return isBreak(e.category) ? s : s + (Number(e.hours) || 0);
+    }, 0);
+  }
+  function dayBreaks(dateStr) {
+    return dayEntries(dateStr).reduce(function (s, e) {
+      return isBreak(e.category) ? s + (Number(e.hours) || 0) : s;
+    }, 0);
   }
 
   /* ---------- render ---------- */
@@ -1634,7 +2217,9 @@
     var total = dayTotal(timeDay);
     var target = Store.settings.prefs.target_hours || 8;
     var tEl = $('#sheet-total');
-    tEl.innerHTML = 'Total <b>' + fmtH(total) + 'h</b>';
+    var brk = dayBreaks(timeDay);
+    tEl.innerHTML = 'Total <b>' + fmtH(total) + 'h</b>' +
+      (brk ? ' <span class="brk">+ ' + fmtH(brk) + 'h break</span>' : '');
     tEl.classList.toggle('over', total > target + 0.01);
 
     restoreFocus(focus);
@@ -2010,7 +2595,7 @@
   function renderInsights() {
     renderRangeButtons();
     var box = $('#insights');
-    var rows = rangeEntries().filter(function (e) { return Number(e.hours) > 0; });
+    var rows = rangeEntries().filter(function (e) { return Number(e.hours) > 0 && !isBreak(e.category); });
 
     if (!rows.length) {
       box.innerHTML = '<div class="ov-card"><p class="ov-none">No hours logged in this period yet.</p></div>';
@@ -2328,6 +2913,10 @@
     $$('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
     $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     $('#fab').hidden = (name !== 'todo');
+    // the date toggle only means anything on the todo list
+    $('#btn-dates').hidden = (name !== 'todo');
+    if (name === 'jobs') { renderJobs(); $$('#jobs textarea').forEach(autoGrow); }
+    if (name === 'todo') $$('#list textarea').forEach(autoGrow);
     if (name === 'overview') renderOverview();
     if (name === 'time') {
       renderTime();
@@ -2354,6 +2943,13 @@
 
     wireConfirm();
     wireArchive();
+    $('#job-add').onclick = function () { createJob(); };
+    $('#btn-dates').onclick = function () {
+      var hide = readDisplay().dates !== 'hide';
+      writeDisplay({ dates: hide ? 'hide' : 'show' });
+      toast(hide ? 'Due dates hidden on this device. Overdue and due-soon items keep a coloured edge.'
+                 : 'Due dates shown');
+    };
     $('#set-update').onclick = checkForUpdate;
     $('#btn-settings').onclick = function () { fillSettings(); $('#dlg-settings').showModal(); };
     $('#btn-archive').onclick = function () { archSel = {}; fillArchive(); $('#dlg-archive').showModal(); };
@@ -2664,6 +3260,10 @@
         writeDisplay({ theme: v });
         fillSettings();
       });
+      wireSettings.segButtons($('#set-dates'), DATES, d.dates, function (v) {
+        writeDisplay({ dates: v });
+        fillSettings();
+      });
     }
 
     /* daily tracker */
@@ -2893,7 +3493,8 @@
       r.onclick = function () {
         var list2 = active();
         var last = list2[list2.length - 1];
-        Store.restore(it.id, last ? last.position + 1024 : 1024);
+        var slot = it.is_job ? jobsSectionSlot() : null;
+        Store.restore(it.id, slot != null ? slot : (last ? last.position + 1024 : 1024));
         delete archSel[it.id];
         fillArchive(); render();
       };
@@ -3027,6 +3628,9 @@
     guessColour: guessColour, daysUntil: daysUntil, dueLabel: dueLabel,
     dueLabelShort: dueLabelShort, dueLabelHtml: dueLabelHtml,
     askConfirm: askConfirm, fillArchive: fillArchive, parseVersion: parseVersion,
+    toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, paintStatus: paintStatus,
+    ensureJobsSection: ensureJobsSection, updateSubs: updateSubs, touchUI: touchUI,
+    openRows: function () { return Object.keys(openRows); },
     fmtDate: fmtDate, dueClass: dueClass, nextWeekday: nextWeekday,
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
     // time log
@@ -3036,6 +3640,8 @@
     dayStart: dayStart, dayChain: dayChain, recomputeDay: recomputeDay,
     maybeMorningRoutine: maybeMorningRoutine, healCategories: healCategories,
     setCatColour: setCatColour,
+    classifyTag: classifyTag, migrateTags: migrateTags, renameCategories: renameCategories,
+    isBreak: isBreak, dayTotal: dayTotal, dayBreaks: dayBreaks, categories: categories,
     readDisplay: readDisplay, writeDisplay: writeDisplay, applyDisplay: applyDisplay,
     debug: function () {
       return {

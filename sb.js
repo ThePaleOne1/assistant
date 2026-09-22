@@ -304,11 +304,19 @@
         if (Object.keys(S.outbox).length && navigator.onLine && (depth || 0) < 5) {
           return flush((depth || 0) + 1);
         }
+        S.schemaBehind = false;
         setStatus(Object.keys(S.outbox).length ? 'offline' : 'synced');
       })
       .catch(function (err) {
         flushing = false; cacheSave();
         console.warn('[sync] flush failed', err);
+        /* A column the app now writes but the database doesn't have yet —
+           i.e. an upload went out before its SQL step was run. Every retry
+           will fail the same way, so say exactly that rather than showing a
+           generic "Retrying" forever. The changes stay queued and go through
+           the moment the column exists. */
+        var msg = String((err && (err.message || err.details || err.hint)) || '');
+        S.schemaBehind = /column .* does not exist|could not find the .* column|schema cache/i.test(msg);
         setStatus(navigator.onLine ? 'error' : 'offline');
       });
 
@@ -469,6 +477,7 @@
     get listId()   { return S.listId; },
     get libFailed(){ return S.libFailed; },
     get pendingCount() { return Object.keys(S.outbox).length; },
+    get schemaBehind() { return !!S.schemaBehind; },
 
     isConfigured: function () {
       var c = window.CONFIG || {};

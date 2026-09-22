@@ -28,6 +28,7 @@
       size = window.matchMedia('(max-width: 680px), (pointer: coarse)').matches ? 'l' : 'm';
     }
     document.documentElement.dataset.size = size;
+    document.documentElement.dataset.dates = d.dates === 'hide' ? 'hide' : 'show';
   } catch (e) {
     document.documentElement.dataset.size = 'm';
   }
@@ -80,6 +81,9 @@
       <button class="pill" id="sync-pill" type="button" title="Sync status">•</button>
     </div>
     <div class="appbar-actions">
+      <button class="iconbtn" id="btn-dates" type="button" title="Hide due dates on this device" aria-label="Show or hide due dates" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path class="slash" d="M3 3l18 18"/></svg>
+      </button>
       <button class="iconbtn" id="btn-theme" title="Light / dark" aria-label="Light or dark">
         <svg viewBox="0 0 24 24" id="icon-theme"></svg>
       </button>
@@ -104,6 +108,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="todo" role="tab">Todo</button>
+    <button class="tab" data-tab="jobs" role="tab">Jobs</button>
     <button class="tab" data-tab="time" role="tab">Daily Tracker</button>
     <button class="tab" data-tab="overview" role="tab">Overview</button>
   </nav>
@@ -119,6 +124,22 @@
       <div class="list-foot">
         <button class="btn ghost small" id="add-section">+ Section</button>
         <button class="btn ghost small" id="add-task-end">+ Task</button>
+      </div>
+      <div class="scroll-pad"></div>
+    </div>
+
+    <!-- Jobs -->
+    <div class="view" id="view-jobs">
+      <div class="jobs-wrap">
+        <div class="jobs-head">
+          <span class="muted small">Each job is also one item in the Jobs section of your todo list.</span>
+          <button class="btn small" id="job-add" type="button">+ New job</button>
+        </div>
+        <div id="jobs"></div>
+        <div id="jobs-empty" class="jobs-empty" hidden>
+          <p>No jobs yet.</p>
+          <p class="muted">Add one to keep its notes and its tasks together.</p>
+        </div>
       </div>
       <div class="scroll-pad"></div>
     </div>
@@ -270,13 +291,17 @@
 
     <section class="group">
       <h3>This device</h3>
-      <p class="muted small">Text size and theme are kept on this device only, so your phone can be large and dark while a monitor stays normal and light.</p>
+      <p class="muted small">Text size, theme and due dates are kept on this device only, so your phone can be large, dark and uncluttered while a monitor stays normal and light.</p>
       <label>Text size
         <div class="seg" id="set-size" style="margin:6px 0 0"></div>
       </label>
       <label>Theme
         <div class="seg" id="set-theme" style="margin:6px 0 0"></div>
       </label>
+      <label>Due dates in the list
+        <div class="seg" id="set-dates" style="margin:6px 0 0"></div>
+      </label>
+      <p class="muted small">Hidden dates still mark overdue and due-soon items with a coloured edge, and opening an item shows its date.</p>
     </section>
 
     <section class="group">
