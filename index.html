@@ -84,6 +84,9 @@
       <button class="iconbtn" id="btn-dates" type="button" title="Hide due dates on this device" aria-label="Show or hide due dates" aria-pressed="false">
         <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path class="slash" d="M3 3l18 18"/></svg>
       </button>
+      <button class="iconbtn" id="btn-split" type="button" title="Show the daily tracker beside the list" aria-label="Show the tracker beside the list" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M13 4.5v15"/></svg>
+      </button>
       <button class="iconbtn" id="btn-theme" title="Light / dark" aria-label="Light or dark">
         <svg viewBox="0 0 24 24" id="icon-theme"></svg>
       </button>
@@ -127,6 +130,10 @@
       </div>
       <div class="scroll-pad"></div>
     </div>
+
+    <!-- The divider between the list and the tracker, side by side (wide screens) -->
+    <div class="split-handle" id="split-handle" role="separator" aria-orientation="vertical"
+      title="Drag to resize · double-click to reset"></div>
 
     <!-- Jobs -->
     <div class="view" id="view-jobs">

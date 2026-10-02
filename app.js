@@ -292,10 +292,12 @@
 
     applyDisplay();
     wireChrome();
+    wireSplit();
     wireTime();
     installDrag();
     paintStatus(Store.status);
     render();
+    applySplit();
     maybeSeed();
     var tagged = migrateTags();
     migratePresets();
@@ -341,7 +343,7 @@
       : 'Sync status';
     if (s === 'error' && Store.schemaBehind && !paintStatus.warned) {
       paintStatus.warned = true;
-      toast('Database needs updating: run supabase/06_jobs_notes.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
+      toast('Database needs updating: run supabase/07_note_numbers.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
     }
   }
 
@@ -849,6 +851,11 @@
   // a tap or click anywhere outside the open row closes it
   function tapLeavesOpenRow(target) {
     if (!openRowId || !target || !target.closest) return false;
+    // A button that a redraw replaced during its own click (the note's number
+    // stepper does this: the redraw puts the cursor back in the note, which
+    // rebuilds the popover) is no longer in the page, so it can't say where
+    // it was. It was tapped on purpose; that isn't tapping away.
+    if (!target.isConnected) return false;
     if (target.closest('.row[data-id="' + openRowId + '"]')) return false;
     // A chip, colour or date in a popover is part of editing the row, so it
     // keeps the row open; the popover's blank background is just "away".
@@ -913,9 +920,14 @@
 
   function extraNotes(it) {
     return ((it && it.extra_notes) || []).map(function (n) {
-      return { id: n.id, text: n.text || '', colour: n.colour || 'none' };
+      var o = { id: n.id, text: n.text || '', colour: n.colour || 'none' };
+      if (n.num) o.num = n.num;
+      return o;
     });
   }
+  /* A note's number (1.10) is only a label he sets: 1-99, or none. The first
+     note's is the item's `note_num`; later notes carry theirs as `num`. */
+  var NUM_MAX = 99;
   function hasAnyNote(it) {
     return !!((it.note || '').trim() || extraNotes(it).some(function (n) { return n.text.trim(); }));
   }
@@ -929,11 +941,13 @@
   }
   function getNote(it, field) {
     if (!it) return { text: '', colour: 'none' };
-    if (field === 'note') return { text: it.note || '', colour: it.note_colour || 'none' };
+    if (field === 'note') return { text: it.note || '', colour: it.note_colour || 'none', num: it.note_num || null };
     var l = extraNotes(it), k = noteIndex(l, field.slice(6));
-    return k >= 0 ? l[k] : { text: '', colour: 'none' };
+    if (k < 0) return { text: '', colour: 'none', num: null };
+    l[k].num = l[k].num || null;
+    return l[k];
   }
-  // patch: { text?, colour? }
+  // patch: { text?, colour?, num? }
   function setNote(itemId, field, patch) {
     var it = Store.byId(itemId);
     if (!it) return;
@@ -941,6 +955,7 @@
       var p = {};
       if ('text' in patch) p.note = patch.text;
       if ('colour' in patch) p.note_colour = patch.colour;
+      if ('num' in patch) p.note_num = patch.num || null;
       Store.update(itemId, p);
       return;
     }
@@ -948,6 +963,7 @@
     if (k < 0) return;
     if ('text' in patch) l[k].text = patch.text;
     if ('colour' in patch) l[k].colour = patch.colour;
+    if ('num' in patch) { if (patch.num) l[k].num = patch.num; else delete l[k].num; }
     Store.update(itemId, { extra_notes: l });
   }
   // a new, empty note straight after `field`; returns its field name
@@ -967,9 +983,15 @@
     var l = extraNotes(it);
     if (field === 'note') {
       // the first note goes by promoting the next one into its place
-      if (!l.length) { Store.update(itemId, { note: '', note_colour: 'none' }); return null; }
+      // (note_num is only written when a number is involved, so a list
+      // with no numbers never sends the column)
+      var clear = { note: '', note_colour: 'none' };
+      if (it.note_num) clear.note_num = null;
+      if (!l.length) { Store.update(itemId, clear); return null; }
       var nx = l.shift();
-      Store.update(itemId, { note: nx.text, note_colour: nx.colour, extra_notes: l });
+      var up = { note: nx.text, note_colour: nx.colour, extra_notes: l };
+      if (it.note_num || nx.num) up.note_num = nx.num || null;
+      Store.update(itemId, up);
       return null;
     }
     var k = noteIndex(l, field.slice(6));
@@ -998,6 +1020,7 @@
     inp.dataset.id = item.id; inp.dataset.field = field;
     wrap.appendChild(inp);
     wrap.dataset.value = inp.value || inp.placeholder;
+    wrap.dataset.num = cur.num || '';
     applyNoteColour(inp, cur.colour);
     bindText(inp, item.id, field);
 
@@ -1482,6 +1505,7 @@
     var colours = (Store.settings.prefs.colours || []);
     cols.appendChild(swatchEl(null));
     colours.forEach(function (c) { cols.appendChild(swatchEl(c)); });
+    cols.appendChild(numStepEl());
 
     pop.hidden = false;
     positionPop(pop, inputEl);
@@ -1533,6 +1557,48 @@
       notePopFor.input.focus();
     };
     return b;
+  }
+
+  /* The note's number: − and + either side of it. Buttons, not a box to
+     type in, so the note keeps the cursor (and the phone keeps its
+     keyboard) just as it does for the colours. − from 1 clears it. */
+  function numStepEl() {
+    var box = document.createElement('span');
+    box.className = 'numstep';
+    box.title = 'Number this note';
+    var cur = function () {
+      var it = notePopFor && Store.byId(notePopFor.item.id);
+      return it ? (getNote(it, notePopFor.field).num || 0) : 0;
+    };
+    var minus = document.createElement('button'), val = document.createElement('span'), plus = document.createElement('button');
+    minus.type = plus.type = 'button';
+    minus.className = 'chip numstep-minus'; minus.textContent = '−'; minus.setAttribute('aria-label', 'Lower the number');
+    plus.className = 'chip numstep-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Raise the number');
+    val.className = 'numstep-val';
+    function paint() {
+      var n = cur();
+      val.textContent = n ? String(n) : '#';
+      val.classList.toggle('none', !n);
+      minus.disabled = !n;
+      plus.disabled = n >= NUM_MAX;
+    }
+    function step(d) {
+      if (!notePopFor) return;
+      var n = cur() + d;
+      if (n < 1) n = null;
+      if (n > NUM_MAX) n = NUM_MAX;
+      setNote(notePopFor.item.id, notePopFor.field, { num: n });
+      var w = notePopFor.input.parentElement;
+      if (w && w.classList.contains('notewrap')) w.dataset.num = n || '';
+      paint();
+      if (notePopFor.input.isConnected) notePopFor.input.focus();
+    }
+    [minus, plus].forEach(function (b) { b.onmousedown = function (e) { e.preventDefault(); }; });
+    minus.onclick = function () { step(-1); };
+    plus.onclick = function () { step(1); };
+    box.append(minus, val, plus);
+    paint();
+    return box;
   }
 
   function closeNotePop() { $('#notepop').hidden = true; notePopFor = null; }
@@ -3175,6 +3241,94 @@
   /* ============================================================
      Chrome: tabs, search, dialogs, settings
      ============================================================ */
+  /* ---------- side by side (wide screens) ----------
+     A per-device choice, kept with theme and text size. When it's on and the
+     window is wide enough, the Todo tab shows the day's log beside the list.
+     It reuses the tracker's own view rather than a copy of it, so everything
+     the tracker does works the same on either side. */
+  var SPLIT_MQ = window.matchMedia ? window.matchMedia('(min-width: 1100px)') : null;
+  var SPLIT_DEFAULT = 55;
+  function splitWanted() { return readDisplay().split === 'on'; }
+  function splitOn() {
+    var t = $('.tab.active');
+    return splitWanted() && !!(SPLIT_MQ && SPLIT_MQ.matches) && !!t && t.dataset.tab === 'todo';
+  }
+  function splitWidth() {
+    var w = parseFloat(readDisplay().split_w);
+    return (w >= 30 && w <= 75) ? w : SPLIT_DEFAULT;
+  }
+  function applySplit() {
+    var on = splitOn();
+    document.body.classList.toggle('split', on);
+    var b = $('#btn-split');
+    if (b) {
+      b.classList.toggle('on', splitWanted());
+      b.setAttribute('aria-pressed', splitWanted() ? 'true' : 'false');
+      b.title = splitWanted() ? 'Back to one view' : 'Show the daily tracker beside the list';
+    }
+    var m = $('main');
+    if (m) m.style.setProperty('--split-left', splitWidth() + '%');
+    if (!on) return;
+    $('#view-time').classList.add('active');
+    // the log only: Insights keeps its place on the Daily Tracker tab
+    $$('.seg-btn').forEach(function (x) { x.classList.toggle('active', x.dataset.pane === 'log'); });
+    $$('.pane').forEach(function (p) { p.classList.toggle('active', p.id === 'pane-log'); });
+    renderTime();
+  }
+  function toggleSplit() {
+    writeDisplay({ split: splitWanted() ? 'off' : 'on' });
+    var t = $('.tab.active');
+    if (splitWanted() && t && t.dataset.tab !== 'todo') switchTab('todo');
+    else switchTab(t ? t.dataset.tab : 'todo');
+  }
+  function wireSplit() {
+    $('#btn-split').onclick = toggleSplit;
+    if (SPLIT_MQ) {
+      var f = function () { var t = $('.tab.active'); switchTab(t ? t.dataset.tab : 'todo'); };
+      if (SPLIT_MQ.addEventListener) SPLIT_MQ.addEventListener('change', f);
+      else if (SPLIT_MQ.addListener) SPLIT_MQ.addListener(f);
+    }
+
+    var h = $('#split-handle'), m = $('main'), dragId = null;
+    function setW(clientX) {
+      var r = m.getBoundingClientRect();
+      if (!r.width) return null;
+      var w = Math.max(30, Math.min(75, (clientX - r.left) / r.width * 100));
+      m.style.setProperty('--split-left', w.toFixed(1) + '%');
+      return w;
+    }
+    // Pointer capture keeps the drag even when the cursor leaves the window,
+    // and lostpointercapture ends it however it ends - a release outside the
+    // window must not leave it stuck mid-drag (trap 5).
+    function end() {
+      if (dragId === null) return;
+      dragId = null;
+      h.classList.remove('dragging');
+      document.body.classList.remove('split-dragging');
+      var w = parseFloat(m.style.getPropertyValue('--split-left'));
+      if (w) writeDisplay({ split_w: Math.round(w * 10) / 10 });
+    }
+    h.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragId = e.pointerId;
+      try { h.setPointerCapture(e.pointerId); } catch (x) {}
+      h.classList.add('dragging');
+      document.body.classList.add('split-dragging');
+    });
+    h.addEventListener('pointermove', function (e) {
+      if (dragId === null || e.pointerId !== dragId) return;
+      setW(e.clientX);
+    });
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+    h.addEventListener('lostpointercapture', end);
+    h.addEventListener('dblclick', function () {
+      writeDisplay({ split_w: SPLIT_DEFAULT });
+      applySplit();
+    });
+  }
+
   function switchTab(name) {
     $$('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
     $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
@@ -3188,6 +3342,7 @@
       renderTime();
       if ($('#pane-insights').classList.contains('active')) renderInsights();
     }
+    applySplit();
   }
 
   function wireChrome() {
@@ -3925,7 +4080,7 @@
     toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, paintStatus: paintStatus,
     ensureJobsSection: ensureJobsSection, touchUI: touchUI, closeOpenRow: closeOpenRow,
     openRow: function () { return openRowId; },
-    extraNotes: extraNotes, noteTexts: noteTexts, getNote: getNote, setNote: setNote,
+    extraNotes: extraNotes, noteTexts: noteTexts, getNote: getNote, setNote: setNote, NUM_MAX: NUM_MAX,
     addNoteAfter: addNoteAfter, removeNote: removeNote, hasAnyNote: hasAnyNote,
     fmtDate: fmtDate, dueClass: dueClass, nextWeekday: nextWeekday,
     hexToRgba: hexToRgba, addDays: addDays, daysSince: daysSince,
@@ -3957,6 +4112,7 @@
     shiftDay: shiftDay, dayLabel: dayLabel, dayEntries: dayEntries, dayTotal: dayTotal,
     catColour: catColour, isWeekday: isWeekday, todayStr: todayStr,
     renderTime: renderTime, renderInsights: renderInsights,
+    splitOn: splitOn, applySplit: applySplit, toggleSplit: toggleSplit, switchTab: switchTab,
     gotoDay: gotoDay, addTimeRow: addTimeRow, repeatLastDay: repeatLastDay,
     get timeDay() { return timeDay; },
     setRange: function (n) { insRange = n; }

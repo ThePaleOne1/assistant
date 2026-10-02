@@ -73,7 +73,7 @@ does. Jobs are name + Details (free writing) + Tasks, where the tasks *are* the 
 item's notes. An open row closes when you tap away. Every new UI element was redone
 from the app's existing parts (see "New UI is built from existing parts" below).
 
-**v1.9 (built 2 Oct; not yet uploaded — see Outstanding).** No SQL step.
+**v1.9 (live from 2 Oct).** No SQL step.
 - **Settings sync fixed.** His note presets kept reverting. Cause: every device wrote
   the *whole* settings row, and a phone that slept through an edit never re-read
   settings on waking — so its next save of anything put the old presets back on
@@ -91,7 +91,18 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   saying how many days/hours in the range were guessed, and a button to leave them
   out (that choice is per device).
 
-Current version is **1.9** (see `config.js`).
+**v1.10 (built 2 Oct; preview only, not uploaded — he wanted to try it first).**
+- **Todo and tracker side by side.** A button in the top bar (wide screens only,
+  1100px+) shows the day's Log to the right of the list on the Todo tab. Each side
+  scrolls on its own; drag the divider to resize (30–75%), double-click to reset to
+  55%. Per device, kept with theme and text size (`split`, `split_w` in
+  `assist:display`). The Daily Tracker tab is unchanged and still has Insights.
+- **A number on a note.** − / + stepper in the note popup, beside the colours;
+  1–99 or none; a label only (no sorting). Shown in a narrow slot left of every
+  note, so notes still line up. **Needs `supabase/07_note_numbers.sql`** (adds
+  `items.note_num`) before upload; later notes keep theirs in `extra_notes` as `num`.
+
+Current version is **1.10** (see `config.js`); **1.9** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -111,17 +122,18 @@ colours to his own choices — leave them alone unless he asks.
 
 As of 2 October 2026.
 
-**To ship 1.9:**
+**To ship 1.10** (once he's tried `preview.html` and is happy):
 
-1. **Upload 1.9** — see Uploading. Confirm the live `config.js` says `1.9`.
-2. **Settings → Check for updates on both devices, promptly.** Until *both* run
-   1.9, the one still on 1.8 can write its whole stale settings row and revert
-   presets, exactly as before.
-3. **Then check Settings → Note presets → Estimating.** The migration copies
-   whatever the old single list held *on the server* at that moment — which may be
-   the reverted set, if the bug struck last. He may need to re-enter his edits
-   once. After that they should stay.
+1. **Run `supabase/07_note_numbers.sql`** in the Supabase SQL editor. Until it
+   has run, numbering a first note is rejected and the badge says "Needs DB
+   update" (the toast names 07). Lists with no numbers never send the column.
+2. **Upload 1.10** — see Uploading. Confirm the live `config.js` says `1.10`.
+3. **Settings → Check for updates on both devices.**
 4. Optional tidy: delete `supabase/06_subtasks_jobs.sql`, a superseded stub.
+
+**After 1.9 (live 2 Oct), still to confirm with him:** both devices updated, the
+Estimating presets are right (the migration copied whatever the server held, which
+may have been the reverted set), and presets have stayed put since.
 
 **Checks that need his devices** (ask him, don't assume):
 
@@ -157,18 +169,20 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 2 October 2026 against v1.9, on the work PC:
+Run on 2 October 2026 against v1.10, on the work PC:
 
 | Suite | Result |
 |---|---|
-| Logic (`tools/test-logic.js`) | **244/244 passed** — incl. the preset migration and guessed days |
+| Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **285/285 at each of desktop, tablet and phone** |
-| Real-touch probes (phone only) | **42/42** — genuine fingertip taps on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **319/319 desktop, 303/303 tablet and phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **47/47** — genuine fingertip taps on an emulated Galaxy A25 |
 
 The sync suite was also run against the 1.8 `sb.js`: it fails 9 of 16, including
 "a stale device saving something else leaves the presets alone" — his bug,
-reproduced. Layout was checked by eye from screenshots at phone and desktop size.
+reproduced. The number stepper's fingertip probe failed before trap 22's fix and
+passes after. Layout was checked by eye from screenshots at phone and desktop size,
+including side by side at 1280 and 1920.
 
 **Not exercised end to end:** the sync fix against real Supabase realtime (the
 pretend database copies its shape; a week of real use is the proof), Settings →
@@ -217,7 +231,7 @@ can tell whether a device has the new code.
 ### Testing — all three suites run fully automated
 
 ```
-node tools/test-logic.js                      # ~245 checks, pure logic, runs in node
+node tools/test-logic.js                      # ~250 checks, pure logic, runs in node
 node tools/test-sync.js                       # the real sb.js, two devices, settings sync
 python3 tools/build_preview.py --with-tests   # builds preview-test.html
 python3 tools/run-dom-tests.py                # drives it at 3 viewports in headless Chromium
@@ -318,7 +332,7 @@ Work PC      ─┘      • todo + time log          │
 | `sb.js` | Data layer: auth, sync, offline outbox, realtime. |
 | `config.js` | Supabase URL + publishable key, `ALLOW_SIGNUP`, `VERSION`. |
 | `sw.js` | Service worker. Network-first, cache as offline fallback. |
-| `supabase/01–06*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub). |
+| `supabase/01–07*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub), note numbers (`07_note_numbers.sql`). |
 | `tools/` | Dev only: mock store, preview builder, the three test suites, the DOM runner, seed data. |
 
 `Reference/` (the original spreadsheet) is no longer in this folder — gone by 25 Sep.
@@ -423,6 +437,18 @@ setting that holds one entry per day/section/item belongs in `MAP_PREFS`.**
 ('YYYY-MM-DD' → true). Unlike `day_starts` it is never pruned — it's history.
 Insights counts guessed days by default and says how much was guessed; the "Leave
 them out" switch is per device (`localStorage['assist:ins-guessed']`).
+
+**Side by side reuses the tracker's own view (1.10).** When on, `#view-time` is
+simply made active alongside `#view-todo` (`applySplit`, run at the end of every
+`switchTab`), with the Log forced and the Log/Insights switch hidden. No copy of the
+tracker exists, so nothing can drift between the two. `body.split` only ever applies
+on the Todo tab at 1100px+.
+
+**A note's number is a label in its own slot (1.10).** He chose: set from the
+popup, shown left of the note, any note, no meaning to the app. The slot
+(`--num-w`, the `.notewrap::before` column) is on every note, numbered or not, which
+is what keeps the column lined up. It's a stepper, not a typing box, so the note
+keeps the cursor and the phone keeps its keyboard, as with the colours.
 
 **Lunch is a break, not work.** `prefs.break_categories` (default `['Lunch']`). A break
 still takes its place in the day's finish-time chain and shows in the day bar, but
@@ -618,6 +644,13 @@ These all cost real debugging time. Each has a regression test now.
     note's input for a fresh copy (trap 16), so the old copy blurs with whatever was
     typed so far, and that got learned: "not a", "not a pr", "Co". Nothing ever
     unlearned them. Removed in 1.9 rather than fixed, at his choice.
+
+22. **A click target a redraw removed can't say where it was.** Tapping the number
+    stepper saves, the redraw puts the cursor back in the note, and that rebuilds the
+    popover — removing the very button being clicked. The "tap away closes the open
+    row" listener then found the detached button outside `#notepop` and closed the
+    row. `tapLeavesOpenRow` now ignores targets that are no longer in the page. Only
+    the real-touch probe caught it.
 
 ---
 

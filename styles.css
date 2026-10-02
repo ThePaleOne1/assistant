@@ -398,20 +398,37 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 /* The note takes the other half, so notes line up in a column no matter
    how long the names are. Both halves clip rather than reflow — a list you
    can scan down is worth more than seeing every word of a long name. */
+/* Every note has a narrow slot at its left for its number (1.10), empty on
+   most. It's on every note, numbered or not, so the chips still start at the
+   same place down the list. */
+:root { --num-w: 1.6em; }
 .notewrap {
   display: inline-grid;
   align-items: center;
   flex: 0 0 50%;
   max-width: 50%;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--num-w) minmax(0, 1fr);
   overflow: hidden;
   font: inherit;
   font-size: var(--fs-md);
 }
+.notewrap::before {
+  content: attr(data-num);
+  grid-area: 1 / 1;
+  align-self: center;
+  text-align: right;
+  padding-right: 5px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
 .notewrap > .note,
 .notewrap::after {
-  grid-area: 1 / 1;
+  grid-area: 1 / 2;
   font: inherit;
   padding: 1px 5px;
   border-radius: 4px;
@@ -548,7 +565,8 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .row.open > .body { flex: 1 1 0; min-width: 0; flex-wrap: wrap; row-gap: 4px; padding-bottom: 7px; }
 .row.open .name,
 .row.open .notes { flex: 1 1 100%; max-width: 100%; }
-.row.open .notewrap { display: block; overflow: visible; }
+.row.open .notewrap { overflow: visible; align-items: start; }
+.row.open .notewrap::before { align-self: start; padding-top: 2px; }
 .row.open .notewrap::after { display: none; }
 .row.open textarea.name,
 .row.open textarea.note {
@@ -772,6 +790,16 @@ body.dragging-active { user-select: none; -webkit-user-select: none; }
   white-space: nowrap;
 }
 .chip:hover { border-color: var(--border-2); }
+
+/* the note's number, beside the colours */
+.numstep { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; padding-left: 8px; }
+.numstep .chip { padding: 3px 10px; line-height: 1.2; }
+.numstep .chip:disabled { opacity: .35; cursor: default; }
+.numstep-val {
+  min-width: 1.8em; text-align: center;
+  font-weight: 650; font-variant-numeric: tabular-nums;
+}
+.numstep-val.none { color: var(--faint); font-weight: 500; }
 
 .swatch {
   width: 26px; height: 26px;
@@ -1230,6 +1258,41 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
   .scroll-pad { height: 60px; }
 }
 
+/* ---------- Side by side: the list on the left, the day on the right ----------
+   Wide screens only, and only when switched on (per device). Each side scrolls
+   on its own; the divider between them sets the split, remembered per device.
+   On the Todo tab only - the Daily Tracker tab still shows the tracker alone,
+   with Insights. */
+.split-handle { display: none; }
+#btn-split.on { color: var(--accent); background: var(--accent-bg); }
+@media (max-width: 1099.98px) {
+  #btn-split { display: none; }
+}
+@media (min-width: 1100px) {
+  body.split main { display: flex; overflow: hidden; min-height: 0; }
+  body.split main > .view.active {
+    overflow-y: auto; overscroll-behavior: contain;
+    min-width: 0;
+  }
+  body.split #view-todo { order: 1; flex: 0 0 var(--split-left, 55%); padding: 0 10px 0 14px; }
+  body.split #view-time { order: 3; flex: 1 1 0; padding: 0 14px 0 6px; }
+  body.split #view-time .seg { display: none; }
+  body.split #view-time .daybar { padding-top: 14px; }
+  body.split .appbar, body.split .tabs, body.split .searchbar { padding-inline: 14px; }
+  body.split .split-handle {
+    display: block; order: 2;
+    flex: 0 0 9px;
+    cursor: col-resize;
+    touch-action: none;
+    background: linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat;
+  }
+  body.split .split-handle:hover,
+  body.split .split-handle.dragging {
+    background: linear-gradient(var(--accent), var(--accent)) center / 3px 100% no-repeat;
+  }
+  body.split.split-dragging { cursor: col-resize; user-select: none; }
+}
+
 /* ============================================================
    Phone
    ------------------------------------------------------------
@@ -1331,13 +1394,13 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
     flex: 1 1 100%;
     min-width: 0;
     max-width: 100%;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: var(--num-w) minmax(0, 1fr);
     overflow: hidden;
   }
   .notewrap::after { max-width: 100%; }
 
   /* an empty note shouldn't claim a line of its own */
-  .row.no-note .notewrap { flex: 0 1 auto; grid-template-columns: auto; }
+  .row.no-note .notewrap { flex: 0 1 auto; grid-template-columns: var(--num-w) auto; }
 
   /* the note column takes what the name's half leaves, exactly as a single
      note used to */
