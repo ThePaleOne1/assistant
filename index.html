@@ -168,6 +168,8 @@
         <div class="daystart">
           <span>Day starts</span>
           <input type="time" id="day-start" step="300" aria-label="What time the day started">
+          <button type="button" class="guess" id="day-guess" aria-pressed="false"
+            title="Mark this day as filled in later, so its times are a best guess">Guessed</button>
         </div>
 
         <div class="daysum" id="day-summary"></div>
@@ -217,9 +219,9 @@
 
 <!-- Note preset popover -->
 <div id="notepop" class="pop" hidden>
-  <div class="pop-row" id="notepop-chips"></div>
-  <div class="pop-sep"></div>
   <div class="pop-row" id="notepop-colours"></div>
+  <div class="pop-sep" id="notepop-sep"></div>
+  <div class="pop-row" id="notepop-chips"></div>
 </div>
 
 <!-- Hours quick-pick -->
@@ -272,20 +274,23 @@
     </section>
 
     <section class="group">
+      <h3>Highlight colours</h3>
+      <p class="muted small">Yellow means you can action it now, pink means you're waiting on someone. Rename or add more as you like.</p>
+      <div id="set-colours" class="presets"></div>
+      <button class="btn ghost small" id="set-colour-add" type="button">+ Add a colour</button>
+    </section>
+
+    <section class="group">
       <h3>Note presets</h3>
-      <p class="muted small">Tap a note field to see these as one-tap chips. Anything you type by hand is learned automatically and joins the list.</p>
+      <p class="muted small">Each section of the list has its own presets, shown as one-tap chips when you tap a note in that section. A new section starts with none.</p>
+      <label>Section
+        <select id="set-preset-section"></select>
+      </label>
       <div id="set-presets" class="presets"></div>
       <div class="row-inline">
         <input type="text" id="set-preset-new" placeholder="Add a preset…">
         <button class="btn ghost small" id="set-preset-add" type="button">Add</button>
       </div>
-    </section>
-
-    <section class="group">
-      <h3>Highlight colours</h3>
-      <p class="muted small">Yellow means you can action it now, pink means you're waiting on someone. Rename or add more as you like.</p>
-      <div id="set-colours" class="presets"></div>
-      <button class="btn ghost small" id="set-colour-add" type="button">+ Add a colour</button>
     </section>
 
     <section class="group">

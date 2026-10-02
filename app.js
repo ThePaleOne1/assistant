@@ -87,12 +87,10 @@
   function guessColour(text) {
     var t = (text || '').toLowerCase();
     if (!t) return 'none';
-    var presets = (Store.settings.prefs.note_presets) || [];
+    var presets = allPresets();
     for (var i = 0; i < presets.length; i++) {
       if (t === presets[i].text.toLowerCase()) return presets[i].colour || 'none';
     }
-    var learned = Store.settings.prefs.learned || {};
-    if (learned[text] && learned[text].colour) return learned[text].colour;
     // prefix match: "On Hold - waiting for docs" inherits from "On Hold"
     for (var j = 0; j < presets.length; j++) {
       if (t.indexOf(presets[j].text.toLowerCase()) === 0) return presets[j].colour || 'none';
@@ -300,6 +298,7 @@
     render();
     maybeSeed();
     var tagged = migrateTags();
+    migratePresets();
     var movedLines = migrateSubtasks();
     if (movedLines) toast(movedLines + ' checklist line' + (movedLines === 1 ? '' : 's') +
       ' from 1.7 kept as notes on the same items.', null, null, 12000);
@@ -396,6 +395,40 @@
     return Store.items.filter(function (i) { return !!i.archived_at; })
       .sort(function (a, b) { return a.archived_at < b.archived_at ? 1 : -1; });
   }
+  /* the section header a row sits under, or null above the first one */
+  function sectionHeaderOf(item) {
+    var list = active(), h = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === item.id) break;
+      if (list[i].kind === 'header') h = list[i];
+    }
+    return h;
+  }
+
+  /* ---------- note presets, per section (1.9) ----------
+     Each section has its own list, keyed by its header's id in
+     prefs.section_presets. A section without an entry offers none, which is
+     what a new section gets. A job always gets the Jobs section's list, so
+     its tasks on the Jobs tab offer the same chips as in the todo list. */
+  function presetsFor(item) {
+    var map = Store.settings.prefs.section_presets || {};
+    var hid = null;
+    if (item && item.is_job && Store.settings.prefs.jobs_section_id) hid = Store.settings.prefs.jobs_section_id;
+    else { var h = item ? sectionHeaderOf(item) : null; hid = h ? h.id : null; }
+    return (hid && Array.isArray(map[hid])) ? map[hid] : [];
+  }
+  function allPresets() {
+    var map = Store.settings.prefs.section_presets || {}, out = [];
+    Object.keys(map).forEach(function (k) { if (Array.isArray(map[k])) out = out.concat(map[k]); });
+    return out;
+  }
+  function setSectionPresets(headerId, list) {
+    var p = Store.settings.prefs;
+    p.section_presets = Object.assign({}, p.section_presets || {});
+    p.section_presets[headerId] = list;
+    Store.saveSettings({ prefs: p });
+  }
+
   /* section title for a task, by looking back up the list */
   function sectionOf(item) {
     var list = active(), name = null;
@@ -867,8 +900,8 @@
 
   /* ---------- notes: more than one per item ----------
      The first note is still the item's own `note` / `note_colour`, exactly
-     as it always was — so reminders, search, the Overview and the learned
-     chips keep working untouched. Any further notes live in `extra_notes`, a
+     as it always was — so reminders, search and the Overview keep working
+     untouched. Any further notes live in `extra_notes`, a
      small list of { id, text, colour }, written back whole. On screen they
      are all the same: highlighter chips stacked one per line in the note
      column. A job's tasks on the Jobs tab are this same list.
@@ -969,7 +1002,6 @@
     bindText(inp, item.id, field);
 
     inp.addEventListener('input', function () {
-      inp.__edited = true;
       syncNoteWidth(inp);
       var r = inp.closest('.row');
       if (r && field === 'note') r.classList.toggle('no-note', !inp.value && !extraNotes(item).length);
@@ -994,13 +1026,6 @@
       }
     });
     inp.addEventListener('blur', function () {
-      // only remember notes you actually typed, so tabbing past one
-      // doesn't inflate it up the chip list
-      if (inp.__edited) {
-        inp.__edited = false;
-        var v = inp.value.trim();
-        if (v) Store.learnNote(v, getNote(Store.byId(item.id), field).colour);
-      }
       setTimeout(function () {
         var a = document.activeElement;
         // A redraw while this note had focus swaps the input for a fresh copy
@@ -1109,6 +1134,8 @@
     }
     h = Store.newItem({ kind: 'header', name: 'Jobs', position: pos });
     p.jobs_section_id = h.id;
+    p.section_presets = Object.assign({}, p.section_presets || {});
+    p.section_presets[h.id] = clonePresets(Store.JOB_PRESET_DEFAULTS);
     Store.saveSettings({ prefs: p });
     return h;
   }
@@ -1446,15 +1473,11 @@
     var chips = $('#notepop-chips'), cols = $('#notepop-colours');
     chips.innerHTML = ''; cols.innerHTML = '';
 
-    var presets = (Store.settings.prefs.note_presets || []).slice();
-    var learned = Store.settings.prefs.learned || {};
-    var learnedKeys = Object.keys(learned).sort(function (a, b) {
-      if (learned[b].n !== learned[a].n) return learned[b].n - learned[a].n;
-      return (learned[b].last || '') < (learned[a].last || '') ? -1 : 1;
-    }).slice(0, 8);
-
-    presets.forEach(function (p) { chips.appendChild(chipEl(p.text, p.colour, false)); });
-    learnedKeys.forEach(function (k) { chips.appendChild(chipEl(k, learned[k].colour, true)); });
+    var presets = presetsFor(Store.byId(item.id) || item);
+    presets.forEach(function (p) { chips.appendChild(chipEl(p.text, p.colour)); });
+    // a section with no presets shows just the colours
+    chips.hidden = !presets.length;
+    $('#notepop-sep').hidden = !presets.length;
 
     var colours = (Store.settings.prefs.colours || []);
     cols.appendChild(swatchEl(null));
@@ -1464,9 +1487,9 @@
     positionPop(pop, inputEl);
   }
 
-  function chipEl(text, colour, learnedFlag) {
+  function chipEl(text, colour) {
     var b = document.createElement('button');
-    b.className = 'chip' + (learnedFlag ? ' learned' : '');
+    b.className = 'chip';
     b.type = 'button';
     b.textContent = text;
     var def = colourDef(colour);
@@ -1478,7 +1501,7 @@
       inp.value = text;
       inp.__dirty = false;          // what's in the box is now saved directly
       syncNoteWidth(inp);
-      var col = colour || guessColour(text);
+      var col = (colour && colour !== 'none') ? colour : guessColour(text);
       applyNoteColour(inp, col);
       var r = inp.closest('.row');
       if (r) r.classList.remove('no-note');
@@ -1919,6 +1942,7 @@
 
   var timeDay = todayStr();
   var insRange = 30;                 // days shown in Insights; 0 = everything
+  var presetSection = null;          // which section's presets Settings is showing
 
   /* Category colours. Named ones are fixed so the charts stay
      recognisable; anything you add later gets one from the pool. */
@@ -2038,6 +2062,50 @@
       Store.update(it.id, patch);
     });
     return moved;
+  }
+
+  function clonePresets(list) {
+    return (list || []).map(function (x) { return { text: x.text, colour: x.colour || 'none' }; });
+  }
+
+  /* 1.9: presets move from one list to one per section. The old list goes to
+     the Estimating section, the Jobs section gets its own four, and the
+     learned chips (which had filled up with half-typed notes) are dropped.
+     Each part is marked done on its own, and only once it has happened: a
+     device that hasn't loaded the list yet, or a list with no Estimating
+     section, just tries again next start. */
+  function migratePresets() {
+    var p = Store.settings.prefs;
+    var m = p.migrations || {};
+    var changed = false;
+    var map = Object.assign({}, p.section_presets || {});
+
+    if (p.learned !== undefined) { delete p.learned; changed = true; }
+
+    var heads = active().filter(function (i) { return i.kind === 'header'; });
+    if (!m.presets_est) {
+      var est = heads.filter(function (h) { return /^\s*estimat/i.test(h.name || ''); })[0];
+      if (est) {
+        if (!Array.isArray(map[est.id])) map[est.id] = clonePresets(p.note_presets);
+        m = Object.assign({}, m, { presets_est: true });
+        changed = true;
+      }
+    }
+    if (!m.presets_jobs) {
+      var jobs = p.jobs_section_id ? Store.byId(p.jobs_section_id) : null;
+      if (!jobs || jobs.archived_at || jobs.kind !== 'header') {
+        jobs = heads.filter(function (h) { return /^\s*jobs\s*$/i.test(h.name || ''); })[0] || null;
+      }
+      if (jobs) {
+        if (!Array.isArray(map[jobs.id])) map[jobs.id] = clonePresets(Store.JOB_PRESET_DEFAULTS);
+        m = Object.assign({}, m, { presets_jobs: true });
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    p.section_presets = map;
+    p.migrations = m;
+    Store.saveSettings({ prefs: p });
   }
 
   function migrateTags() {
@@ -2207,6 +2275,20 @@
     var over = (Store.settings.prefs.day_starts || {})[dateStr];
     return parseClock(over || Store.settings.prefs.day_start || '07:30') || 450;
   }
+  /* A guessed day was filled in afterwards rather than as it happened.
+     Kept per day in prefs.guessed_days, never pruned: it's part of the
+     history, unlike a day's start time. */
+  function isGuessed(dateStr) {
+    return !!(Store.settings.prefs.guessed_days || {})[dateStr];
+  }
+  function setGuessed(dateStr, on) {
+    var p = Store.settings.prefs;
+    var g = Object.assign({}, p.guessed_days || {});
+    if (on) g[dateStr] = true; else delete g[dateStr];
+    p.guessed_days = g;
+    Store.saveSettings({ prefs: p });
+  }
+
   function setDayStart(dateStr, mins) {
     var p = Store.settings.prefs;
     var starts = Object.assign({}, p.day_starts || {});
@@ -2306,6 +2388,11 @@
     $('#day-today').hidden = (timeDay === todayStr());
     var ds = $('#day-start');
     if (ds && document.activeElement !== ds) ds.value = fmtClock(dayStart(timeDay));
+    var gb = $('#day-guess');
+    if (gb) {
+      gb.classList.toggle('active', isGuessed(timeDay));
+      gb.setAttribute('aria-pressed', isGuessed(timeDay) ? 'true' : 'false');
+    }
 
     // where the day went
     var rows = dayEntries(timeDay);
@@ -2354,7 +2441,8 @@
     var tEl = $('#sheet-total');
     var brk = dayBreaks(timeDay);
     tEl.innerHTML = 'Total <b>' + fmtH(total) + 'h</b>' +
-      (brk ? ' <span class="brk">+ ' + fmtH(brk) + 'h break</span>' : '');
+      (brk ? ' <span class="brk">+ ' + fmtH(brk) + 'h break</span>' : '') +
+      (isGuessed(timeDay) ? ' <span class="brk">· guessed</span>' : '');
     tEl.classList.toggle('over', total > target + 0.01);
 
     restoreFocus(focus);
@@ -2727,23 +2815,62 @@
     return Store.time.filter(function (e) { return e.work_date >= cut; });
   }
 
+  /* Whether Insights counts guessed days. Per device, like the range. */
+  function insGuessed() {
+    try { return localStorage.getItem('assist:ins-guessed') !== 'off'; } catch (e) { return true; }
+  }
+  function setInsGuessed(on) {
+    try { localStorage.setItem('assist:ins-guessed', on ? 'on' : 'off'); } catch (e) {}
+  }
+
+  /* How much of the period was filled in later, with the switch to leave it out. */
+  function cardGuessed(all) {
+    var days = {}, gH = 0, tH = 0;
+    all.forEach(function (e) {
+      var h = Number(e.hours) || 0;
+      tH += h;
+      if (isGuessed(e.work_date)) { days[e.work_date] = true; gH += h; }
+    });
+    var n = Object.keys(days).length;
+    if (!n) return '';
+    var incl = insGuessed();
+    var pct = tH ? Math.round(gH / tH * 100) : 0;
+    var text = incl
+      ? '<b>' + n + ' day' + (n === 1 ? '' : 's') + '</b> here ' + (n === 1 ? 'was' : 'were') +
+        ' filled in later: <b>' + fmtH(gH) + 'h</b>, ' + pct + '% of the hours. Their times are a best guess.'
+      : 'Leaving out <b>' + n + ' guessed day' + (n === 1 ? '' : 's') + '</b> (' + fmtH(gH) +
+        'h). Everything below is from days logged as they happened.';
+    return '<div class="ov-card"><h3>Guessed days</h3><p class="ov-none">' + text + '</p>' +
+      '<button type="button" class="btn ghost small" id="ins-guess-toggle" style="margin-top:6px">' +
+      (incl ? 'Leave them out' : 'Put them back in') + '</button></div>';
+  }
+
   function renderInsights() {
     renderRangeButtons();
     var box = $('#insights');
-    var rows = rangeEntries().filter(function (e) { return Number(e.hours) > 0 && !isBreak(e.category); });
+    var all = rangeEntries().filter(function (e) { return Number(e.hours) > 0 && !isBreak(e.category); });
+    var rows = insGuessed() ? all : all.filter(function (e) { return !isGuessed(e.work_date); });
+    var html = cardGuessed(all);
 
     if (!rows.length) {
-      box.innerHTML = '<div class="ov-card"><p class="ov-none">No hours logged in this period yet.</p></div>';
+      box.innerHTML = html + '<div class="ov-card"><p class="ov-none">' +
+        (all.length ? 'Every day in this period is marked as guessed.' : 'No hours logged in this period yet.') +
+        '</p></div>';
+      wireGuessToggle();
       return;
     }
 
-    var html = '';
     html += cardSplit(rows);
     html += cardStages(rows);
     html += cardRecurring(rows);
     html += cardDays(rows);
     html += cardSmallStuff(rows);
     box.innerHTML = html;
+    wireGuessToggle();
+  }
+  function wireGuessToggle() {
+    var b = $('#ins-guess-toggle');
+    if (b) b.onclick = function () { setInsGuessed(!insGuessed()); renderInsights(); };
   }
 
   function renderRangeButtons() {
@@ -3017,6 +3144,10 @@
     $('#day-picker').onchange = function () { if (this.value) gotoDay(this.value); };
     $('#row-add').onclick = function () { addTimeRow(); };
     $('#row-copy').onclick = repeatLastDay;
+    $('#day-guess').onclick = function () {
+      setGuessed(timeDay, !isGuessed(timeDay));
+      renderTime();
+    };
     $('#day-start').onchange = function () {
       var m = parseClock(this.value);
       if (m == null) return;
@@ -3144,13 +3275,16 @@
       fillSettings();
     };
 
+    $('#set-preset-section').onchange = function () {
+      presetSection = $('#set-preset-section').value;
+      fillSettings();
+    };
     $('#set-preset-add').onclick = function () {
       var v = $('#set-preset-new').value.trim();
-      if (!v) return;
-      var p = Store.settings.prefs.note_presets.slice();
-      p.push({ text: v, colour: guessColour(v) });
-      Store.settings.prefs.note_presets = p;
-      Store.saveSettings({ prefs: Store.settings.prefs });
+      if (!v || !presetSection) return;
+      var list = clonePresets((Store.settings.prefs.section_presets || {})[presetSection]);
+      list.push({ text: v, colour: guessColour(v) });
+      setSectionPresets(presetSection, list);
       $('#set-preset-new').value = '';
       fillSettings();
     };
@@ -3329,9 +3463,33 @@
       box.appendChild(wrap);
     });
 
-    /* note presets */
+    /* note presets, for the section picked */
+    var heads = active().filter(function (i) { return i.kind === 'header'; });
+    var psel = $('#set-preset-section');
+    psel.innerHTML = '';
+    if (!heads.some(function (h) { return h.id === presetSection; })) {
+      var withSome = heads.filter(function (h) { return ((s.prefs.section_presets || {})[h.id] || []).length; })[0];
+      presetSection = (withSome || heads[0] || {}).id || null;
+    }
+    heads.forEach(function (h) {
+      var o = document.createElement('option');
+      o.value = h.id;
+      o.textContent = (h.name || '').trim() || 'Untitled section';
+      if (h.id === presetSection) o.selected = true;
+      psel.appendChild(o);
+    });
+    psel.disabled = !heads.length;
+    $('#set-preset-new').disabled = $('#set-preset-add').disabled = !presetSection;
     var pbox = $('#set-presets'); pbox.innerHTML = '';
-    (s.prefs.note_presets || []).forEach(function (p, i) {
+    var plist = clonePresets((s.prefs.section_presets || {})[presetSection]);
+    if (!plist.length) {
+      var none = document.createElement('p');
+      none.className = 'muted small';
+      none.style.margin = '0';
+      none.textContent = presetSection ? 'No presets in this section.' : 'Add a section to the list first.';
+      pbox.appendChild(none);
+    }
+    plist.forEach(function (p, i) {
       var el = document.createElement('div'); el.className = 'preset-item';
       var dot = document.createElement('span'); dot.className = 'dot';
       var def = colourDef(p.colour);
@@ -3342,14 +3500,14 @@
         cols.push('none');
         var idx = cols.indexOf(p.colour || 'none');
         p.colour = cols[(idx + 1) % cols.length];
-        Store.saveSettings({ prefs: s.prefs });
+        setSectionPresets(presetSection, plist);
         fillSettings();
       };
       var txt = document.createElement('span'); txt.textContent = p.text;
       var x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
       x.onclick = function () {
-        s.prefs.note_presets.splice(i, 1);
-        Store.saveSettings({ prefs: s.prefs });
+        plist.splice(i, 1);
+        setSectionPresets(presetSection, plist);
         fillSettings();
       };
       el.append(dot, txt, x);
@@ -3780,6 +3938,9 @@
     setCatColour: setCatColour,
     classifyTag: classifyTag, migrateTags: migrateTags, renameCategories: renameCategories,
     migrateSubtasks: migrateSubtasks,
+    migratePresets: migratePresets, presetsFor: presetsFor, allPresets: allPresets,
+    sectionHeaderOf: sectionHeaderOf, setSectionPresets: setSectionPresets,
+    isGuessed: isGuessed, setGuessed: setGuessed, insGuessed: insGuessed, setInsGuessed: setInsGuessed,
     isBreak: isBreak, dayTotal: dayTotal, dayBreaks: dayBreaks, categories: categories,
     readDisplay: readDisplay, writeDisplay: writeDisplay, applyDisplay: applyDisplay,
     debug: function () {

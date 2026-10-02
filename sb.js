@@ -62,10 +62,21 @@
     { label: 'Submitting', match: ['quote', 'submit', 'coverpage', 'cover page', 'send off', 'pdf'] }
   ];
 
+  /* What a new Jobs section offers. No colours: set them in Settings. */
+  var DEFAULT_JOB_PRESETS = [
+    { text: 'Hand Over',    colour: 'none' },
+    { text: 'Make Folders', colour: 'none' },
+    { text: 'POs',          colour: 'none' },
+    { text: 'Review',       colour: 'none' }
+  ];
+
   var DEFAULT_PREFS = {
+    /* Note presets belong to a section: header id -> [{ text, colour }].
+       A section with no entry offers none. `note_presets` is the old single
+       list; since 1.9 it is only read once, to seed the Estimating section. */
+    section_presets: {},
     note_presets: DEFAULT_PRESETS,
     colours: DEFAULT_COLOURS,
-    learned: {},      // "note text" -> { n: uses, last: iso, colour: key }
     stale_days: 14,
     categories: DEFAULT_CATEGORIES,
     category_colours: {},                // name -> hex, overrides the built-in colour
@@ -78,6 +89,7 @@
     /* daily tracker */
     day_start: '07:30',                  // when a normal day begins
     day_starts: {},                      // per-day exceptions, pruned after 180 days
+    guessed_days: {},                    // 'YYYY-MM-DD' -> true: filled in later, not as it happened
     round_minutes: 15,                   // what "Finished now" snaps to
     routine_task: 'morning routine - check invoices, update todo list, etc',
     routine_minutes: 30,
@@ -102,6 +114,8 @@
     items: [],
     time: [],
     settings: defaultSettings(),
+    base: null,              // settings as the server last had them (see "Settings sync")
+    dirty: {},               // settings paths changed here and not yet on the server
     outbox: {},              // "table:id" -> { op:'upsert'|'hard', table, row }
     status: 'offline',
     libFailed: false,
@@ -169,6 +183,7 @@
     LS.set(nsKey('items'), S.items);
     LS.set(nsKey('time'), S.time);
     LS.set(nsKey('settings'), S.settings);
+    LS.set(nsKey('settings_dirty'), S.dirty);
     LS.set(nsKey('list'), S.listId);
     LS.set(nsKey('outbox'), S.outbox);
   }
@@ -181,6 +196,8 @@
     if (Array.isArray(tm)) S.time = tm;
     var st = LS.get(nsKey('settings'), null);
     if (st) S.settings = mergeSettings(st);
+    S.base = clone(S.settings);
+    S.dirty = LS.get(nsKey('settings_dirty'), {}) || {};
     S.listId = LS.get(nsKey('list'), null);
     S.outbox = LS.get(nsKey('outbox'), {}) || {};
 
@@ -212,7 +229,8 @@
     };
     if (!Array.isArray(out.prefs.note_presets) || !out.prefs.note_presets.length) out.prefs.note_presets = DEFAULT_PRESETS.slice();
     if (!Array.isArray(out.prefs.colours) || !out.prefs.colours.length) out.prefs.colours = DEFAULT_COLOURS.slice();
-    if (!out.prefs.learned || typeof out.prefs.learned !== 'object') out.prefs.learned = {};
+    if (!isMap(out.prefs.section_presets)) out.prefs.section_presets = {};
+    if (!isMap(out.prefs.guessed_days)) out.prefs.guessed_days = {};
     if (!out.prefs.stale_days) out.prefs.stale_days = 14;
     if (!Array.isArray(out.prefs.categories) || !out.prefs.categories.length) out.prefs.categories = DEFAULT_CATEGORIES.slice();
     if (!Array.isArray(out.prefs.stage_rules) || !out.prefs.stage_rules.length) out.prefs.stage_rules = DEFAULT_STAGE_RULES.slice();
@@ -228,6 +246,158 @@
     }
     if (out.prefs.routine_minutes == null) out.prefs.routine_minutes = 30;
     return out;
+  }
+
+  /* ============================================================
+     Settings sync
+     ------------------------------------------------------------
+     Settings are one row, and every device used to write the whole of it.
+     A phone that had slept through an edit on the PC still held the old
+     copy, and the next thing it saved - anything at all - put the old
+     presets back on both devices.
+
+     Now a device sends only what it changed. It keeps `base`, the settings
+     as the server last had them; a save compares against that and records
+     the paths that differ in `dirty` (kept in localStorage, so an offline
+     edit survives a reload). A push reads the server's row fresh, lays just
+     those paths over it, and writes that back. Settings that hold one entry
+     per day or per section are compared entry by entry, so marking one day
+     on the phone can't undo a different day marked on the PC.
+     ============================================================ */
+  var TOP_KEYS = ['ntfy_topic', 'timezone', 'reminder_times', 'app_url'];
+  var MAP_PREFS = ['day_starts', 'guessed_days', 'section_presets'];
+
+  function isMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+  function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+  function getPath(obj, path) {
+    var v = obj;
+    for (var i = 0; i < path.length; i++) {
+      if (!isMap(v)) return undefined;
+      v = Object.prototype.hasOwnProperty.call(v, path[i]) ? v[path[i]] : undefined;
+    }
+    return v;
+  }
+  function setPath(obj, path, value) {
+    var o = obj;
+    for (var i = 0; i < path.length - 1; i++) {
+      if (!isMap(o[path[i]])) o[path[i]] = {};
+      o = o[path[i]];
+    }
+    var last = path[path.length - 1];
+    if (value === undefined) delete o[last]; else o[last] = value;
+  }
+  // a path travels as one string so it can key `dirty`
+  function pathKey(path) { return path.join('\n'); }
+  function keyPath(key) { return key.split('\n'); }
+
+  /* Every path where `local` differs from `base`. */
+  function settingsDiff(base, local) {
+    var out = [];
+    TOP_KEYS.forEach(function (k) {
+      if (!same(base[k], local[k])) out.push([k]);
+    });
+    var bp = base.prefs || {}, lp = local.prefs || {};
+    var keys = Object.keys(bp).concat(Object.keys(lp)).filter(function (k, i, a) { return a.indexOf(k) === i; });
+    keys.forEach(function (k) {
+      if (MAP_PREFS.indexOf(k) >= 0 && (isMap(bp[k]) || bp[k] === undefined) && (isMap(lp[k]) || lp[k] === undefined)) {
+        var b = bp[k] || {}, l = lp[k] || {};
+        Object.keys(b).concat(Object.keys(l)).filter(function (x, i, a) { return a.indexOf(x) === i; })
+          .forEach(function (x) { if (!same(b[x], l[x])) out.push(['prefs', k, x]); });
+      } else if (!same(bp[k], lp[k])) {
+        out.push(['prefs', k]);
+      }
+    });
+    return out;
+  }
+
+  /* `server`, with this device's unsent changes laid over it. */
+  function overlayDirty(server) {
+    var out = clone(server);
+    Object.keys(S.dirty).forEach(function (key) {
+      var path = keyPath(key);
+      setPath(out, path, clone(getPath(S.settings, path)));
+    });
+    return out;
+  }
+
+  /* Change S.settings to `next` without replacing the objects. Settings
+     screens hold on to Store.settings.prefs while they're open; swapping it
+     for a new object would leave them editing - and then saving - a stale
+     copy, which is the bug this whole section exists to prevent. */
+  function adopt(next) {
+    var cur = S.settings;
+    if (!cur || !isMap(cur.prefs)) { S.settings = next; return; }
+    TOP_KEYS.forEach(function (k) { cur[k] = next[k]; });
+    var p = cur.prefs;
+    Object.keys(p).forEach(function (k) {
+      if (!Object.prototype.hasOwnProperty.call(next.prefs, k)) delete p[k];
+    });
+    Object.keys(next.prefs).forEach(function (k) { p[k] = next.prefs[k]; });
+  }
+
+  /* The server's settings row has arrived (fetched, or pushed by realtime). */
+  function takeServerSettings(raw) {
+    S.base = mergeSettings(clone(raw));
+    adopt(mergeSettings(overlayDirty(S.base)));
+  }
+
+  function noteDirty() {
+    if (!S.base) S.base = clone(S.settings);
+    settingsDiff(S.base, S.settings).forEach(function (path) { S.dirty[pathKey(path)] = true; });
+    // a path changed and then changed back is no longer anyone's business
+    Object.keys(S.dirty).forEach(function (key) {
+      var path = keyPath(key);
+      if (same(getPath(S.base, path), getPath(S.settings, path))) delete S.dirty[key];
+    });
+  }
+
+  function settingsRow(s) {
+    return {
+      user_id: S.user.id,
+      ntfy_topic: s.ntfy_topic,
+      timezone: s.timezone,
+      reminder_times: s.reminder_times,
+      app_url: s.app_url,
+      prefs: s.prefs
+    };
+  }
+
+  /* One push at a time: two in flight could each read the row before the
+     other wrote it, and the second would undo the first. */
+  var settingsFlight = Promise.resolve();
+  function pushSettings() {
+    settingsFlight = settingsFlight.then(pushSettingsNow, pushSettingsNow);
+    return settingsFlight;
+  }
+  function pushSettingsNow() {
+    if (!S.client || !S.user || !navigator.onLine) return;
+    var keys = Object.keys(S.dirty);
+    if (!keys.length) return;
+    var sent = {};
+    return S.client.from('settings').select('*').eq('user_id', S.user.id).maybeSingle()
+      .then(function (r) {
+        if (r.error) throw r.error;
+        var next = mergeSettings(clone(r.data || defaultSettings()));
+        keys.forEach(function (key) {
+          var path = keyPath(key), v = getPath(S.settings, path);
+          sent[key] = JSON.stringify(v);
+          setPath(next, path, clone(v));
+        });
+        return S.client.from('settings').upsert(settingsRow(next), { onConflict: 'user_id' })
+          .then(function (r2) {
+            if (r2.error) throw r2.error;
+            // done, unless it was changed again while this was in the air
+            keys.forEach(function (key) {
+              if (JSON.stringify(getPath(S.settings, keyPath(key))) === sent[key]) delete S.dirty[key];
+            });
+            takeServerSettings(next);
+            cacheSave();
+            emit('settings');
+          });
+      })
+      .catch(function (e) { console.warn('[settings]', e); });
   }
 
   /* ============================================================
@@ -341,12 +511,12 @@
     return S.client.from('settings').select('*').eq('user_id', S.user.id).maybeSingle()
       .then(function (r) {
         if (r.error) throw r.error;
-        if (r.data) { S.settings = mergeSettings(r.data); return; }
+        if (r.data) { takeServerSettings(r.data); return pushSettings(); }
         var d = defaultSettings();
         d.user_id = S.user.id;
         return S.client.from('settings').insert(d).then(function (r2) {
           if (r2.error) throw r2.error;
-          S.settings = mergeSettings(d);
+          takeServerSettings(d);
         });
       });
   }
@@ -372,10 +542,14 @@
   function pull() {
     return Promise.all([
       S.client.from('items').select('*').order('position', { ascending: true }),
-      S.client.from('time_entries').select('*').order('work_date', { ascending: true })
+      S.client.from('time_entries').select('*').order('work_date', { ascending: true }),
+      // Settings too: realtime drops while a phone sleeps, and waking up
+      // without this left it holding settings from before the nap.
+      S.client.from('settings').select('*').eq('user_id', S.user.id).maybeSingle()
     ]).then(function (res) {
       if (res[0].error) throw res[0].error;
       merge('items', res[0].data);
+      if (!res[2].error && res[2].data) { takeServerSettings(res[2].data); emit('settings'); }
 
       // the time log is optional — if 03_time_log.sql hasn't been run yet
       // the todo list should still work rather than failing to load
@@ -409,7 +583,7 @@
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'settings', filter: 'user_id=eq.' + S.user.id },
         function (payload) {
-          if (payload.new) { S.settings = mergeSettings(payload.new); cacheSave(); emit('settings'); }
+          if (payload.new) { takeServerSettings(payload.new); cacheSave(); emit('settings'); }
         })
       .subscribe(function (status) {
         if (status === 'SUBSCRIBED') {
@@ -463,6 +637,7 @@
 
     COLOUR_DEFAULTS: DEFAULT_COLOURS,
     PRESET_DEFAULTS: DEFAULT_PRESETS,
+    JOB_PRESET_DEFAULTS: DEFAULT_JOB_PRESETS,
     CATEGORY_DEFAULTS: DEFAULT_CATEGORIES,
     STAGE_DEFAULTS: DEFAULT_STAGE_RULES,
 
@@ -563,7 +738,7 @@
     },
 
     signOut: function () {
-      var keys = ['items', 'time', 'settings', 'list', 'outbox'].map(nsKey);
+      var keys = ['items', 'time', 'settings', 'settings_dirty', 'list', 'outbox'].map(nsKey);
       var done = S.client ? S.client.auth.signOut() : Promise.resolve();
       // clear locally and reload even if the server call fails, so the
       // button never just sits there doing nothing
@@ -725,50 +900,11 @@
     },
 
     saveSettings: function (patch) {
-      S.settings = mergeSettings(Object.assign({}, S.settings, patch));
+      adopt(mergeSettings(Object.assign({}, S.settings, patch)));
+      noteDirty();
       cacheSave();
       emit('settings');
-      if (!S.client || !S.user) return Promise.resolve();
-      var row = {
-        user_id: S.user.id,
-        ntfy_topic: S.settings.ntfy_topic,
-        timezone: S.settings.timezone,
-        reminder_times: S.settings.reminder_times,
-        app_url: S.settings.app_url,
-        prefs: S.settings.prefs
-      };
-      return S.client.from('settings').upsert(row, { onConflict: 'user_id' })
-        .then(function (r) { if (r.error) console.warn('[settings]', r.error); });
-    },
-
-    /* remember a hand-typed note so it becomes a one-tap chip later */
-    learnNote: function (text, colour) {
-      text = (text || '').trim();
-      if (text.length < 2 || text.length > 60) return;
-      var presets = S.settings.prefs.note_presets || [];
-      for (var i = 0; i < presets.length; i++) {
-        if (presets[i].text.toLowerCase() === text.toLowerCase()) return;
-      }
-      var learned = S.settings.prefs.learned || (S.settings.prefs.learned = {});
-      var key = text;
-      var e = Object.prototype.hasOwnProperty.call(learned, key) ? learned[key] : { n: 0 };
-      e.n += 1;
-      e.last = nowIso();
-      if (colour && colour !== 'none') e.colour = colour;
-      learned[key] = e;
-
-      // keep the 40 most useful
-      var keys = Object.keys(learned);
-      if (keys.length > 40) {
-        keys.sort(function (a, b) {
-          if (learned[b].n !== learned[a].n) return learned[b].n - learned[a].n;
-          return (learned[b].last || '') < (learned[a].last || '') ? -1 : 1;
-        });
-        var trimmed = {};
-        keys.slice(0, 40).forEach(function (k) { trimmed[k] = learned[k]; });
-        S.settings.prefs.learned = trimmed;
-      }
-      Store.saveSettings({ prefs: S.settings.prefs });
+      return pushSettings();
     },
 
     resync: function () {
@@ -777,6 +913,7 @@
       // flush() resolves with the in-flight request when one is already
       // running, so pull() can never race ahead of a write
       return flush()
+        .then(pushSettings)
         .then(function () { return S.listId ? null : ensureList().then(ensureSettings); })
         .then(pull)
         .then(function () {

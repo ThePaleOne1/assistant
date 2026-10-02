@@ -6,9 +6,28 @@ fresh chat can pick up without re-deriving everything.
 Named `CLAUDE.md` because that's the file a Claude session looks for in a project
 folder. Nothing in here is secret — it's safe in the public repo.
 
-**Last verified: 22 September 2026.** Everything below was checked that day rather
-than carried forward on trust. If you're reading this much later, the facts are
-probably still right but the "verified" claims are only as good as their date.
+**Last verified: 2 October 2026.** Everything below was checked rather than
+carried forward on trust: the code facts and test runs on 2 October, the live site
+on 25 September. If you're reading this much later, the facts are
+probably still right, but a "verified" claim is only as good as its date — and this
+file has twice carried a limitation that had quietly stopped being true. Test before
+believing one.
+
+---
+
+## Where this gets worked on
+
+**From 24 September 2026 this project is worked on in Claude Code, running on the
+work PC in the project folder itself.** That session has a real shell and edits the
+files directly: it can run git, run both test suites, and check what's live. Nothing
+needs staging or copying anywhere.
+
+Earlier sessions were Cowork cloud sessions, which reached the folder through file
+tools and did the work in a Linux container. Those still work, and the file says
+where the two differ. Two habits carried over from them that are worth keeping:
+
+- **Check what's actually live before believing a device** (see Uploading).
+- **Run both suites, and look at a screenshot, before saying something is done.**
 
 ---
 
@@ -48,20 +67,31 @@ tap-again-to-edit on the phone, a per-device toggle to hide due dates, Claude an
 Lunch tracker categories (Lunch is a break and stays out of totals), CEILED renamed
 Ceiled, and a Settings → Check for updates button.
 
-**v1.8 (built 22 Sep, not yet uploaded when this was written):** the v1.7 checklist
-is gone — he'd meant *more than one note per item*, which is what 1.8 does. Jobs are
-now name + Details (free writing) + Tasks, where the tasks *are* the job item's notes.
-An open row closes when you tap away. Every new UI element was redone from the app's
-existing parts (see "New UI is built from existing parts" below). Any checklist lines
-entered while 1.7 was live are carried over as extra notes on first start.
+**v1.8 (live from 22 Sep; its SQL, `06_jobs_notes.sql`, confirmed run 25 Sep):** the
+v1.7 checklist is gone — he'd meant *more than one note per item*, which is what 1.8
+does. Jobs are name + Details (free writing) + Tasks, where the tasks *are* the job
+item's notes. An open row closes when you tap away. Every new UI element was redone
+from the app's existing parts (see "New UI is built from existing parts" below).
 
-Current version is **1.8** (see `config.js`).
+**v1.9 (built 2 Oct; not yet uploaded — see Outstanding).** No SQL step.
+- **Settings sync fixed.** His note presets kept reverting. Cause: every device wrote
+  the *whole* settings row, and a phone that slept through an edit never re-read
+  settings on waking — so its next save of anything put the old presets back on
+  both devices. Now a device sends only what it changed, and waking re-reads
+  settings. See "Settings sync" below and trap 20.
+- **Note presets are per section** (Settings → Note presets → pick a section). The
+  old list went to Estimating; Jobs got Hand Over / Make Folders / POs / Review with
+  no colours (he'll set them); every other section, and any new one, has none.
+- **The learned chips are gone**, wiped from his settings. They'd filled up with
+  half-typed notes ("not a pr", "Co") — trap 21.
+- **The colour row is above the preset chips** in the note popover, and Highlight
+  colours is above Note presets in Settings.
+- **Guessed days in the tracker.** A "Guessed" toggle by Day starts marks a day
+  filled in later. The sheet total says "· guessed". Insights opens with a card
+  saying how many days/hours in the range were guessed, and a button to leave them
+  out (that choice is per device).
 
-**v1.8 needs `supabase/06_jobs_notes.sql` run in Supabase *before* it is uploaded**
-— items gain `extra_notes` (and `is_job` / `job_notes` if the earlier 06 wasn't run).
-Until they exist, item writes are rejected and the sync badge says "Needs DB update";
-nothing is lost, changes wait on the device. `06_subtasks_jobs.sql` is a superseded
-stub — nothing to run. Confirm with him that the new file ran.
+Current version is **1.9** (see `config.js`).
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -77,25 +107,72 @@ went out, the tracker breakdown is on Tenders, the category order is fixed, and
 reminders have been running the way he wants for days. He has also set the category
 colours to his own choices — leave them alone unless he asks.
 
+### Outstanding
+
+As of 2 October 2026.
+
+**To ship 1.9:**
+
+1. **Upload 1.9** — see Uploading. Confirm the live `config.js` says `1.9`.
+2. **Settings → Check for updates on both devices, promptly.** Until *both* run
+   1.9, the one still on 1.8 can write its whole stale settings row and revert
+   presets, exactly as before.
+3. **Then check Settings → Note presets → Estimating.** The migration copies
+   whatever the old single list held *on the server* at that moment — which may be
+   the reverted set, if the bug struck last. He may need to re-enter his edits
+   once. After that they should stay.
+4. Optional tidy: delete `supabase/06_subtasks_jobs.sql`, a superseded stub.
+
+**Checks that need his devices** (ask him, don't assume):
+
+5. **Firefox layout.** Every automated run is Chromium. Have him open
+   `preview-test.html` on the work PC in Firefox and look at the todo list, the
+   Jobs tab, the note popover and the tracker's Guessed button. Outstanding since v1.6.
+6. **Presets stay put.** The real test of the sync fix is a week of normal use with
+   both devices on 1.9 and no reverting.
+7. **The Estimating section is found.** The migration looks for a section whose
+   name starts "Estimat". If his is called something else, the old presets wait
+   (nothing is lost) — ask him what it's called.
+8. **Scrolling with a finger while editing**, on the phone: it should leave the
+   keyboard alone. Can't be emulated; only he can confirm.
+
+**Known, not yet raised with him:**
+
+9. **Insights cards overflow on the phone.** At 411px the cards are ~493px wide
+   and clip on the right. Present in 1.8 too (measured against the 1.8 build), so
+   not caused by 1.9. Probably a grid item's `min-width: auto` growing to its
+   widest table. Ask before fixing.
+
+**Deferred on purpose** (not forgotten, not to be started unasked):
+
+10. **The AI assistant tab** — a second view that reads the list and suggests
+    priorities. The Overview tab is shaped so it can drop in. A free Gemini or Groq
+    key would do it. He chose to defer, not drop.
+11. **Multiple lists** — the `lists` table and `list_id` already exist, so it's a UI
+    change rather than a migration.
+12. **The home PC** — deliberately parked; two minutes if he ever wants it.
+
+**Decided (25 Sep):** note-less rows keep the 50/50 split; "Details" stays as the
+label for a job's free writing.
+
 ### Verification status
 
-Run on 22 September 2026 against v1.8:
+Run on 2 October 2026 against v1.9, on the work PC:
 
 | Suite | Result |
 |---|---|
-| Logic (`tools/test-logic.js`) | **226/226 passed** — incl. the tag retag over the real imported history, and the 1.7 checklist carry-over |
-| DOM (`tools/run-dom-tests.py`) | **262/262 at each of desktop, tablet and phone** |
+| Logic (`tools/test-logic.js`) | **244/244 passed** — incl. the preset migration and guessed days |
+| Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
+| DOM (`tools/run-dom-tests.py`) | **285/285 at each of desktop, tablet and phone** |
 | Real-touch probes (phone only) | **42/42** — genuine fingertip taps on an emulated Galaxy A25 |
 
-Mutation-checked: 14 of the v1.7/v1.8 fixes were each undone in turn and the suite
-confirmed to fail — 14 of 14 caught. Layout was also checked by eye from screenshots
-at phone and desktop size (see trap 14 for why that matters).
+The sync suite was also run against the 1.8 `sb.js`: it fails 9 of 16, including
+"a stale device saving something else leaves the presets alone" — his bug,
+reproduced. Layout was checked by eye from screenshots at phone and desktop size.
 
-**Not exercised end to end:** Settings → Check for updates (needs the live site and
-a signed-in session — the preview declines it, and that refusal is tested), and the
-"Needs DB update" badge against a real Supabase error (the message matching is
-tested with a faked flag, not a real rejected write). Firefox layout is still only
-proxied by Chromium.
+**Not exercised end to end:** the sync fix against real Supabase realtime (the
+pretend database copies its shape; a week of real use is the proof), Settings →
+Check for updates (needs the live site), and Firefox layout (proxied by Chromium).
 
 ---
 
@@ -104,34 +181,74 @@ proxied by Chromium.
 Plain HTML, CSS and JavaScript. No build step, no npm, no framework. The only
 external dependency is the Supabase client from a CDN.
 
-**Uploading:** double-click `Upload to GitHub.cmd`. It now compares against GitHub
-itself on every run, so a failed upload is always retried next time, and it checks the
-push actually landed before saying "Done". Then on each device: **Settings → Check for
-updates**, which clears the service worker, its caches and the browser's HTTP cache
-before reloading.
+**Uploading:** `Upload to GitHub.cmd` (he double-clicks it) stages everything, shows
+what changed, refuses to run if a private file is about to be published, compares
+against GitHub on every run so a failed upload is retried next time, and checks the
+push actually landed before saying "Done".
 
-**To see what is actually live**, fetch `https://thepaleone1.github.io/assistant/config.js`
-with WebFetch — the cloud container's `curl` is blocked from github.io by egress policy,
-but WebFetch gets through. Do this before assuming a device-side cache problem.
+**A session with a shell can upload instead** — but not by running that script: it
+stops at a `set /p` prompt for the commit message and will hang. Do the same steps
+directly, keeping its safety net:
 
-The script also stages everything, shows what
-changed, and refuses to run if a private file is about to be published. Do not go
-back to dragging files into GitHub's web UI — a file got missed that way once and
-cost a debugging cycle. A Claude session **cannot** run this script for him: it
-needs the local shell, which is broken (see Known issues). Make the edits, tell him
-to double-click it.
+```
+git add -A
+git diff --cached --name-only        # must not list tools/, Reference/, 04_seed_timelog
+git commit -m "..."
+git pull --rebase origin main
+git push origin main
+git rev-list --count origin/main..HEAD    # 0 means it really landed
+```
+
+Never go back to dragging files into GitHub's web UI — a file got missed that way
+once and cost a debugging cycle.
+
+Then on each device: **Settings → Check for updates**, which clears the service
+worker, its caches and the browser's HTTP cache before reloading.
+
+**To see what is actually live**, read
+`https://thepaleone1.github.io/assistant/config.js` and look at its VERSION. Do that
+before believing a device-side cache problem — twice now the site itself was behind.
+(From a Cowork cloud container, `curl` is blocked from github.io by egress policy but
+WebFetch gets through; from the PC, either works.)
 
 **Always bump `VERSION` in `config.js`** when changing anything. It's the only way he
 can tell whether a device has the new code.
 
-### Testing — both suites run fully automated, in a cloud container
+### Testing — all three suites run fully automated
 
 ```
-node tools/test-logic.js                      # ~190 checks, pure logic, runs in node
+node tools/test-logic.js                      # ~245 checks, pure logic, runs in node
+node tools/test-sync.js                       # the real sb.js, two devices, settings sync
 python3 tools/build_preview.py --with-tests   # builds preview-test.html
 python3 tools/run-dom-tests.py                # drives it at 3 viewports in headless Chromium
 python3 tools/build_preview.py                # builds preview.html to play with
 ```
+
+**On the work PC, check the tools are there before promising a test run**
+(`node -v`, `python --version` or `py -3 --version`, `python -c "import playwright"`).
+Windows usually spells it `python` or `py -3`, not `python3`. The DOM runner needs
+Playwright and its Chromium:
+
+```
+py -3 -m pip install playwright
+py -3 -m playwright install chromium
+```
+
+**On the work PC (25 Sep), `playwright install chromium` timed out every time**,
+even with `PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=300000`, while `curl` fetched the
+same URLs fine. The fix was to download the four zips with `curl` (URLs from
+`py -3 -m playwright install --dry-run chromium`), unzip each into its "Install
+location" under `%LOCALAPPDATA%\ms-playwright\`, and create empty
+`INSTALLATION_COMPLETE` and `DEPENDENCIES_VALIDATED` files in each. It's installed
+now; this only matters after a Playwright upgrade.
+
+**Only `tools/test-sync.js` runs the real `sb.js`.** The logic and DOM suites both
+use `tools/mock-store.js`, so a change to sync, the outbox or settings saving is
+untested unless it's covered there.
+
+If that can't be installed, the logic suite still runs under node, and
+`preview-test.html` can be opened in a browser by hand — it shows the same pass/fail
+panel. Say which of the two ran; don't imply both did.
 
 **Do not record anywhere that the DOM suite can't be run.** An earlier version of
 this file implied that, because the only browser anyone had thought to use was the
@@ -202,8 +319,10 @@ Work PC      ─┘      • todo + time log          │
 | `config.js` | Supabase URL + publishable key, `ALLOW_SIGNUP`, `VERSION`. |
 | `sw.js` | Service worker. Network-first, cache as offline fallback. |
 | `supabase/01–06*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub). |
-| `tools/` | Dev only: mock store, preview builder, both test suites, the DOM runner, seed data. |
-| `Reference/` | The original spreadsheet the history came from. |
+| `tools/` | Dev only: mock store, preview builder, the three test suites, the DOM runner, seed data. |
+
+`Reference/` (the original spreadsheet) is no longer in this folder — gone by 25 Sep.
+It's still listed in `.gitignore`, which is harmless.
 
 ### Data model
 
@@ -277,6 +396,33 @@ whatever else the row carries — a date, several notes, dates hidden. The note 
 (`.notes`) takes exactly the sizing a single note used to. (A v1.7 checklist chip once
 pushed one row's note out of line; anything added to a row must not.) Tested at every
 width, dates shown and hidden (DOM test 11j).
+
+**Note presets belong to sections (1.9).** `prefs.section_presets` maps a section
+header's id to its list. No entry means no presets — what a new section gets. A job
+always uses the Jobs section's list (`presetsFor` checks `is_job` first), so the
+Jobs tab and the todo list offer the same chips. `prefs.note_presets` is the old
+single list, read once by `migratePresets()` to seed Estimating; leave it. The
+migration marks Estimating and Jobs done separately (`migrations.presets_est`,
+`presets_jobs`), and only once the section exists, so a device that hasn't loaded
+the list yet doesn't mark it done with nothing done.
+
+**Nothing is learned from typing.** The learned chips were removed in 1.9 at his
+request (trap 21). Don't bring back anything that guesses chips from what he types.
+
+**Settings sync is per path, not per row (1.9).** `sb.js` keeps `base` (settings
+as the server last had them) and `dirty` (paths changed here, in localStorage). A
+save diffs against `base`; a push re-reads the row, lays only the dirty paths over
+it, and writes it back, one push at a time. `day_starts`, `guessed_days` and
+`section_presets` are compared entry by entry (`MAP_PREFS`), so two devices editing
+different days or sections both keep their change. Incoming settings are applied
+*into* the existing `Store.settings` objects (`adopt`), never by swapping them,
+because the Settings dialog holds `Store.settings.prefs` while open. **Any new
+setting that holds one entry per day/section/item belongs in `MAP_PREFS`.**
+
+**A guessed day is a per-day flag, not per row.** `prefs.guessed_days`
+('YYYY-MM-DD' → true). Unlike `day_starts` it is never pruned — it's history.
+Insights counts guessed days by default and says how much was guessed; the "Leave
+them out" switch is per device (`localStorage['assist:ins-guessed']`).
 
 **Lunch is a break, not work.** `prefs.break_categories` (default `['Lunch']`). A break
 still takes its place in the day's finish-time chain and shows in the day bar, but
@@ -460,6 +606,19 @@ These all cost real debugging time. Each has a regression test now.
    limitation, write down *why* it's true, so the next session can test whether it
    still is — and if you find one that isn't, fix the file.
 
+20. **Never write the whole settings row from one device.** Up to 1.8 every save
+    sent all of settings, and `pull()` refreshed items and the time log but never
+    settings. A phone that slept through a preset edit on the PC held the old copy;
+    the next time it saved anything (the learned-chip counter did, on nearly every
+    note) it reverted both devices. He saw it as presets "defaulting back every now
+    and then". Fixed by per-path saves and re-reading settings on wake — see
+    "Settings sync is per path". `tools/test-sync.js` replays it.
+
+21. **Learning from `blur` captured half-typed text.** A redraw mid-typing swaps a
+    note's input for a fresh copy (trap 16), so the old copy blurs with whatever was
+    typed so far, and that got learned: "not a", "not a pr", "Co". Nothing ever
+    unlearned them. Removed in 1.9 rather than fixed, at his choice.
+
 ---
 
 ## How Lachlan likes to work
@@ -489,27 +648,17 @@ These all cost real debugging time. Each has a regression test now.
   would do it — he chose to defer it, not drop it.
 - **Multiple lists.** The `lists` table and `list_id` already exist, so it's a UI
   change rather than a migration.
-- **Rows with no note still cap the name at half the row.** On the phone that clips
-  names like "sort out pas…" beside empty space. Letting a note-less row's name use
-  the full width would help the cramped phone view, but it's his "long names clip"
-  rule, so ask before changing it. Tapping the row reads it in full meanwhile.
 
 ## Known issues
 
-- **The local Cowork sandbox on his machine is broken** — the VM starts with no drive
-  shares, so `device_bash` fails with `no Plan9 drive shares mounted` and no shell
-  command runs on his PC. Survives reboots and app restarts; reported to Anthropic.
-  **Re-confirmed still broken 10 Sep 2026.**
+- **The Cowork local sandbox is working again.** It was broken from 8 to at least
+  22 September (the VM started with no drive shares, so `device_bash` failed with
+  `no Plan9 drive shares mounted`). **Verified working again 24 Sep 2026** — the
+  folder is mounted, with node, python3 and git available. Anything in this file that
+  reads as "a session can't run commands on his PC" is out of date; test it with one
+  command before believing it.
 
-  This is much less limiting than it sounds, and it is not a reason to give up on
-  anything:
-  - The plain file tools work normally either way — `device_list_dir`,
-    `device_stage_files`, `device_commit_files`.
-  - A cloud session has a full Linux container with node, python, Chromium and
-    Playwright. **Everything except running `Upload to GitHub.cmd` can be done there.**
-  - The working pattern: stage the project files up with `device_stage_files`, copy
-    them out of the read-only `/mnt/user-data/uploads/` into a working directory,
-    make the changes, run both suites, then write the changed files back with
-    `device_commit_files`. Only the upload itself needs him.
-
-  Test whether it's fixed before assuming — one `device_bash` call answers it.
+- **GitHub Pages can lag behind a push.** On 22 September two pushes landed at 9:04
+  and 10:57 and the site still served 1.4 for a while. Check the push landed
+  (`git rev-list --count origin/main..HEAD` is 0), then give Pages time before
+  looking for another cause.
