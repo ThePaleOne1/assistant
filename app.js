@@ -3561,6 +3561,70 @@
     };
   }
 
+  /* Drag a preset by its grip to reorder it. The chips stay where they are
+     while you drag - a thin accent bar shows where it will land - and it
+     moves when you let go. (Moving the chip live made the chips re-wrap under
+     the finger on a narrow phone, and the drop spot jumped about.) The
+     pointer is captured by the box, which a redraw can't remove mid-drag the
+     way it could a chip. The grip alone takes the drag (touch-action: none),
+     so on the phone a swipe that starts on a chip still scrolls Settings. */
+  function presetDrag(grip, el, box, list) {
+    grip.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || box.__drag) return;
+      e.preventDefault();
+      var id = e.pointerId, from = Number(el.dataset.i), to = null;
+      box.__drag = true;
+      try { box.setPointerCapture(id); } catch (x) {}
+      el.classList.add('dragging');
+
+      function mark(target, after) {
+        $$('.preset-item', box).forEach(function (it) { it.classList.remove('drop-before', 'drop-after'); });
+        if (target) target.classList.add(after ? 'drop-after' : 'drop-before');
+      }
+      function move(ev) {
+        if (ev.pointerId !== id) return;
+        var best = null, bd = Infinity;
+        $$('.preset-item', box).forEach(function (it) {
+          var r = it.getBoundingClientRect();
+          // rows count for more than columns: a chip on the line you're on
+          // beats a nearer-looking one on the next line
+          var d = Math.hypot(ev.clientX - (r.left + r.width / 2), (ev.clientY - (r.top + r.height / 2)) * 3);
+          if (d < bd) { bd = d; best = it; }
+        });
+        if (!best || best === el) { to = null; mark(null); return; }
+        var r = best.getBoundingClientRect();
+        var after = ev.clientY > r.bottom ? true : ev.clientY < r.top ? false : ev.clientX > r.left + r.width / 2;
+        var at = Number(best.dataset.i) + (after ? 1 : 0);   // a slot between chips, 0..n
+        // the slots either side of the chip being dragged leave it where it is
+        if (at === from || at === from + 1) { to = null; mark(null); return; }
+        to = at;
+        mark(best, after);
+      }
+      function end(ev) {
+        if (ev && ev.pointerId !== undefined && ev.pointerId !== id) return;
+        box.removeEventListener('pointermove', move);
+        box.removeEventListener('pointerup', end);
+        box.removeEventListener('pointercancel', end);
+        box.removeEventListener('lostpointercapture', end);
+        box.__drag = false;
+        el.classList.remove('dragging');
+        mark(null);
+        // Settings redrawn mid-drag (an edit from the other device): the
+        // chips on screen are no longer the ones being counted, so leave it
+        if (to === null || !el.isConnected || (ev && ev.type === 'pointercancel')) return;
+        var order = list.slice();
+        var moved = order.splice(from, 1)[0];
+        order.splice(to > from ? to - 1 : to, 0, moved);
+        setSectionPresets(presetSection, order);
+        fillSettings();
+      }
+      box.addEventListener('pointermove', move);
+      box.addEventListener('pointerup', end);
+      box.addEventListener('pointercancel', end);
+      box.addEventListener('lostpointercapture', end);
+    });
+  }
+
   function dedupeSort(arr) {
     var seen = {}, out = [];
     arr.forEach(function (n) { if (!seen[n]) { seen[n] = 1; out.push(n); } });
@@ -3646,6 +3710,12 @@
     }
     plist.forEach(function (p, i) {
       var el = document.createElement('div'); el.className = 'preset-item';
+      el.dataset.i = i;
+      // its own class, not .handle: the list's drag claims every .handle
+      var grip = document.createElement('span');
+      grip.className = 'pgrip'; grip.innerHTML = svgGrip;
+      grip.title = 'Drag to reorder';
+      presetDrag(grip, el, pbox, plist);
       var dot = document.createElement('span'); dot.className = 'dot';
       var def = colourDef(p.colour);
       dot.style.background = def ? def.hex : 'transparent';
@@ -3665,7 +3735,7 @@
         setSectionPresets(presetSection, plist);
         fillSettings();
       };
-      el.append(dot, txt, x);
+      el.append(grip, dot, txt, x);
       pbox.appendChild(el);
     });
 

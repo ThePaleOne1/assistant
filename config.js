@@ -28,5 +28,5 @@ window.CONFIG = {
   // Shown at the bottom of Settings. Bump it whenever you push a change,
   // so you can tell at a glance whether a device has picked the change up.
   APP_NAME: 'Assistant',
-  VERSION: '1.10 — side by side, numbered notes'
+  VERSION: '1.11 — reorder note presets'
 };

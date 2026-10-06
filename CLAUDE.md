@@ -6,9 +6,8 @@ fresh chat can pick up without re-deriving everything.
 Named `CLAUDE.md` because that's the file a Claude session looks for in a project
 folder. Nothing in here is secret — it's safe in the public repo.
 
-**Last verified: 2 October 2026.** Everything below was checked rather than
-carried forward on trust: the code facts and test runs on 2 October, the live site
-on 25 September. If you're reading this much later, the facts are
+**Last verified: 6 October 2026.** Everything below was checked rather than
+carried forward on trust: the code facts, test runs and live site on 6 October. If you're reading this much later, the facts are
 probably still right, but a "verified" claim is only as good as its date — and this
 file has twice carried a limitation that had quietly stopped being true. Test before
 believing one.
@@ -91,7 +90,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   saying how many days/hours in the range were guessed, and a button to leave them
   out (that choice is per device).
 
-**v1.10 (built 2 Oct; preview only, not uploaded — he wanted to try it first).**
+**v1.10 (live from 2 Oct — he uploaded it himself with the script at 16:06).**
 - **Todo and tracker side by side.** A button in the top bar (wide screens only,
   1100px+) shows the day's Log to the right of the list on the Todo tab. Each side
   scrolls on its own; drag the divider to resize (30–75%), double-click to reset to
@@ -102,7 +101,13 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   note, so notes still line up. **Needs `supabase/07_note_numbers.sql`** (adds
   `items.note_num`) before upload; later notes keep theirs in `extra_notes` as `num`.
 
-Current version is **1.10** (see `config.js`); **1.9** is what's live.
+**v1.11 (built 6 Oct; not yet uploaded).** No SQL step.
+- **Drag to reorder note presets** in Settings → Note presets, by a small grip at
+  the left of each chip. The chips stay put while dragging; an accent bar in the
+  gap shows where it will land, and it moves on release. Only the grip drags
+  (`touch-action: none`), so a swipe on a chip still scrolls Settings on the phone.
+
+Current version is **1.11** (see `config.js`); **1.10** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -122,12 +127,12 @@ colours to his own choices — leave them alone unless he asks.
 
 As of 2 October 2026.
 
-**To ship 1.10** (once he's tried `preview.html` and is happy):
+**To ship 1.11:**
 
-1. **Run `supabase/07_note_numbers.sql`** in the Supabase SQL editor. Until it
-   has run, numbering a first note is rejected and the badge says "Needs DB
-   update" (the toast names 07). Lists with no numbers never send the column.
-2. **Upload 1.10** — see Uploading. Confirm the live `config.js` says `1.10`.
+1. **Confirm `supabase/07_note_numbers.sql` has been run** — 1.10 went live without
+   anyone confirming it. If it hasn't, numbering a *first* note is rejected and the
+   badge says "Needs DB update" (the toast names 07); nothing is lost.
+2. **Upload 1.11** — see Uploading. Confirm the live `config.js` says `1.11`.
 3. **Settings → Check for updates on both devices.**
 4. Optional tidy: delete `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
@@ -169,14 +174,14 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 2 October 2026 against v1.10, on the work PC:
+Run on 6 October 2026 against v1.11, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **319/319 desktop, 303/303 tablet and phone** (side by side is desktop-only) |
-| Real-touch probes (phone only) | **47/47** — genuine fingertip taps on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **326/326 desktop, 310/310 tablet and phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **50/50** — genuine fingertip taps and drags on an emulated Galaxy A25 |
 
 The sync suite was also run against the 1.8 `sb.js`: it fails 9 of 16, including
 "a stale device saving something else leaves the presets alone" — his bug,
@@ -449,6 +454,13 @@ popup, shown left of the note, any note, no meaning to the app. The slot
 (`--num-w`, the `.notewrap::before` column) is on every note, numbered or not, which
 is what keeps the column lined up. It's a stepper, not a typing box, so the note
 keeps the cursor and the phone keeps its keyboard, as with the colours.
+
+**Presets reorder by a drop marker, not by moving the chip (1.11).** The first
+version moved the chip live as you dragged; on the phone the chips wrap onto
+several lines, so each move re-wrapped them under the finger and the drop spot
+jumped about — only the fingertip-drag probe caught it. Now nothing moves until
+release. The grip is `.pgrip`, not `.handle`: the list's drag claims every
+`.handle` (trap 1).
 
 **Lunch is a break, not work.** `prefs.break_categories` (default `['Lunch']`). A break
 still takes its place in the day's finish-time chain and shows in the day bar, but
