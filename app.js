@@ -1530,9 +1530,14 @@
       var r = inp.closest('.row');
       if (r) r.classList.remove('no-note');
       setNote(it.id, fld, { text: text, colour: col });
-      openNotePop(Store.byId(it.id) || it, inp);   // refresh selected swatch
-      inp.focus();
-      try { inp.setSelectionRange(text.length, text.length); } catch (e) {}
+      // Picking a preset finishes the note (1.12): the chips close and the edit
+      // ends, which on the phone puts the keyboard away. Ending the edit is
+      // what keeps them closed - left focused, the redraw that follows hands
+      // focus to a fresh copy of the note, and that reopens the chips.
+      closeNotePop();
+      var a = document.activeElement;
+      if (a && a.dataset && a.dataset.id === it.id && a.dataset.field === fld) a.blur();
+      else if (inp.isConnected) inp.blur();
     };
     return b;
   }
@@ -1657,6 +1662,10 @@
      Measured against the *visual* viewport, so on a phone the chip row
      sits above the soft keyboard instead of underneath it. */
   function positionPop(pop, anchor) {
+    // An anchor a redraw has replaced reports a position of 0,0, which threw
+    // the popover into the top-left corner until the next reposition. Leave
+    // it where it is; the new copy of the anchor will place it.
+    if (!anchor || !anchor.isConnected) return;
     pop.style.left = '0px'; pop.style.top = '0px';
     var r = anchor.getBoundingClientRect();
     var pr = pop.getBoundingClientRect();

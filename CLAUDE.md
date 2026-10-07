@@ -6,8 +6,8 @@ fresh chat can pick up without re-deriving everything.
 Named `CLAUDE.md` because that's the file a Claude session looks for in a project
 folder. Nothing in here is secret — it's safe in the public repo.
 
-**Last verified: 6 October 2026.** Everything below was checked rather than
-carried forward on trust: the code facts, test runs and live site on 6 October. If you're reading this much later, the facts are
+**Last verified: 7 October 2026.** Everything below was checked rather than
+carried forward on trust: the code facts and test runs on 7 October, the live site on 6 October. If you're reading this much later, the facts are
 probably still right, but a "verified" claim is only as good as its date — and this
 file has twice carried a limitation that had quietly stopped being true. Test before
 believing one.
@@ -90,7 +90,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   saying how many days/hours in the range were guessed, and a button to leave them
   out (that choice is per device).
 
-**v1.10 (live from 2 Oct — he uploaded it himself with the script at 16:06).**
+**v1.10 (live from 2 Oct — he uploaded it himself with the script at 16:06; its SQL, `07_note_numbers.sql`, confirmed run 6 Oct).**
 - **Todo and tracker side by side.** A button in the top bar (wide screens only,
   1100px+) shows the day's Log to the right of the list on the Todo tab. Each side
   scrolls on its own; drag the divider to resize (30–75%), double-click to reset to
@@ -101,13 +101,19 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   note, so notes still line up. **Needs `supabase/07_note_numbers.sql`** (adds
   `items.note_num`) before upload; later notes keep theirs in `extra_notes` as `num`.
 
-**v1.11 (built 6 Oct; not yet uploaded).** No SQL step.
+**v1.11 (live from 6 Oct — he uploaded it himself; confirmed working on the live app).** No SQL step.
 - **Drag to reorder note presets** in Settings → Note presets, by a small grip at
   the left of each chip. The chips stay put while dragging; an accent bar in the
   gap shows where it will land, and it moves on release. Only the grip drags
   (`touch-action: none`), so a swipe on a chip still scrolls Settings on the phone.
 
-Current version is **1.11** (see `config.js`); **1.10** is what's live.
+**v1.12 (built 7 Oct; not yet uploaded).** No SQL step.
+- **Picking a preset closes the chips and ends the edit** (his request). It fixes
+  the chips jumping to the top-left corner for a moment after a pick — trap 23.
+  The row stays open.
+
+Current version is **1.12** (see `config.js`); **1.11** is what's live (he reported
+everything working on it, 6 Oct).
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -125,16 +131,12 @@ colours to his own choices — leave them alone unless he asks.
 
 ### Outstanding
 
-As of 2 October 2026.
+As of 7 October 2026.
 
-**To ship 1.11:**
-
-1. **Confirm `supabase/07_note_numbers.sql` has been run** — 1.10 went live without
-   anyone confirming it. If it hasn't, numbering a *first* note is rejected and the
-   badge says "Needs DB update" (the toast names 07); nothing is lost.
-2. **Upload 1.11** — see Uploading. Confirm the live `config.js` says `1.11`.
-3. **Settings → Check for updates on both devices.**
-4. Optional tidy: delete `supabase/06_subtasks_jobs.sql`, a superseded stub.
+**To ship 1.12:** upload (see Uploading — he often runs the script himself), confirm
+the live `config.js` says `1.12`, then Settings → Check for updates on both devices.
+Every SQL file has been run (07 confirmed 6 Oct). Optional tidy: delete
+`supabase/06_subtasks_jobs.sql`, a superseded stub.
 
 **After 1.9 (live 2 Oct), still to confirm with him:** both devices updated, the
 Estimating presets are right (the migration copied whatever the server held, which
@@ -174,15 +176,17 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 6 October 2026 against v1.11, on the work PC:
+Run on 7 October 2026 against v1.12, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **326/326 desktop, 310/310 tablet and phone** (side by side is desktop-only) |
-| Real-touch probes (phone only) | **50/50** — genuine fingertip taps and drags on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **329/329 desktop, 313/313 tablet and phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **56/56** — genuine fingertip taps and drags on an emulated Galaxy A25 |
 
+The preset-tap probe was run against the 1.11 `app.js` too: it caught the chips at
+(8, 6), the top-left corner — his bug, reproduced.
 The sync suite was also run against the 1.8 `sb.js`: it fails 9 of 16, including
 "a stale device saving something else leaves the presets alone" — his bug,
 reproduced. The number stepper's fingertip probe failed before trap 22's fix and
@@ -663,6 +667,14 @@ These all cost real debugging time. Each has a regression test now.
     row" listener then found the detached button outside `#notepop` and closed the
     row. `tapLeavesOpenRow` now ignores targets that are no longer in the page. Only
     the real-touch probe caught it.
+
+23. **Placing a popover against a detached element sends it to the corner.** Picking
+    a preset saved the note, the redraw swapped the note for a fresh copy, and the
+    chips were then re-placed against the old copy — which, out of the page, reports
+    a position of 0,0. They sat in the top-left corner until focus reached the new
+    copy. `positionPop` now ignores an anchor that isn't in the page; and picking a
+    preset now closes the chips and ends the edit anyway (1.12). A real-touch probe
+    records every position the chips take during a pick.
 
 ---
 
