@@ -107,13 +107,19 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   gap shows where it will land, and it moves on release. Only the grip drags
   (`touch-action: none`), so a swipe on a chip still scrolls Settings on the phone.
 
-**v1.12 (built 7 Oct; not yet uploaded).** No SQL step.
+**v1.12 (live from 7 Oct — he uploaded it).** No SQL step.
 - **Picking a preset closes the chips and ends the edit** (his request). It fixes
   the chips jumping to the top-left corner for a moment after a pick — trap 23.
   The row stays open.
 
-Current version is **1.12** (see `config.js`); **1.11** is what's live (he reported
-everything working on it, 6 Oct).
+**v1.13 (built 20 Oct; not yet uploaded).** No SQL step.
+- **Double-click (double-tap on the phone) a job in the todo list** — anywhere on
+  its row, name and notes included — opens it on the Jobs tab, the same as its
+  "Open in Jobs →" link (`openInJobs`). His choice over keeping double-click for
+  selecting a word; single click/tap still edits. On a job row the phone's
+  double-tap no longer opens-and-edits. The date, × and grip are left out.
+
+Current version is **1.13** (see `config.js`); **1.12** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -131,10 +137,10 @@ colours to his own choices — leave them alone unless he asks.
 
 ### Outstanding
 
-As of 7 October 2026.
+As of 20 October 2026.
 
-**To ship 1.12:** upload (see Uploading — he often runs the script himself), confirm
-the live `config.js` says `1.12`, then Settings → Check for updates on both devices.
+**To ship 1.13:** upload (see Uploading — he often runs the script himself), confirm
+the live `config.js` says `1.13`, then Settings → Check for updates on both devices.
 Every SQL file has been run (07 confirmed 6 Oct). Optional tidy: delete
 `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
@@ -176,14 +182,14 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 7 October 2026 against v1.12, on the work PC:
+Run on 20 October 2026 against v1.13, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **329/329 desktop, 313/313 tablet and phone** (side by side is desktop-only) |
-| Real-touch probes (phone only) | **56/56** — genuine fingertip taps and drags on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **334/334 desktop, 318/318 tablet and phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **59/59** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
 
 The preset-tap probe was run against the 1.11 `app.js` too: it caught the chips at
 (8, 6), the top-left corner — his bug, reproduced.

@@ -578,6 +578,8 @@
     var t = e.target;
     if (!t || !t.matches || !t.matches('textarea, input:not([type]), input[type=text]')) return;
     if (!t.closest('#view-todo, #view-jobs')) return;
+    // On a job in the list, a double-tap goes to the Jobs tab instead (1.13).
+    if (t.closest('#list .row.is-job')) return;
     if (document.activeElement !== t) t.focus();
     try { var n = t.value.length; t.setSelectionRange(n, n); } catch (err) {}
   }, false);
@@ -883,6 +885,28 @@
     ta.style.height = ta.scrollHeight + 'px';
   }
 
+  /* A job, opened on the Jobs tab: from "Open in Jobs →", or a double-click
+     (double-tap) anywhere on its row in the list (1.13). */
+  function openInJobs(id) {
+    var a = document.activeElement;
+    if (a && a.blur && a.closest && a.closest('#view-todo')) a.blur();
+    closeNotePop(); closeDatePop();
+    try { window.getSelection().removeAllRanges(); } catch (err) {}
+    openJobs[id] = true;
+    openRowId = null;
+    switchTab('jobs');
+    scrollToIn('#jobs', id);
+  }
+  document.addEventListener('dblclick', function (e) {
+    var t = e.target;
+    var row = t && t.closest && t.closest('#list .row.is-job');
+    if (!row || !row.dataset.id) return;
+    // Not the bits with their own job: the date, the × and the drag grip.
+    if (t.closest('.duebtn, .delbtn, .handle')) return;
+    e.preventDefault();
+    openInJobs(row.dataset.id);
+  });
+
   function rowExtraEl(t) {
     var box = document.createElement('div');
     box.className = 'row-extra addrow';
@@ -891,10 +915,7 @@
     go.textContent = 'Open in Jobs →';
     go.onclick = function (e) {
       e.stopPropagation();
-      openJobs[t.id] = true;
-      openRowId = null;
-      switchTab('jobs');
-      scrollToIn('#jobs', t.id);
+      openInJobs(t.id);
     };
     box.appendChild(go);
     return box;
