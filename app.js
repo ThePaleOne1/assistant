@@ -852,7 +852,6 @@
      open is per device and never synced: it's where you're reading, not
      data. */
   var openRowId = null;
-  var openJobs = Object.create(null);
   var TOUCH_MQ = (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)')) || { matches: false };
   function touchUI() { return !!TOUCH_MQ.matches; }
 
@@ -868,11 +867,38 @@
     render();
     return true;
   }
-  function toggleJob(id, force) {
-    var on = force == null ? !openJobs[id] : !!force;
-    if (on) openJobs[id] = true; else delete openJobs[id];
-    render();
+  /* Which job the Jobs tab shows (1.15), per device and never synced, like
+     the open row: which list (active or completed) and the job last open in
+     each. A job that's gone falls back to the first in its list. */
+  var JOBS_KEY = 'assist:jobs';
+  function jobsState() {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem(JOBS_KEY) || '{}') || {}; } catch (e) {}
+    if (s.list !== 'done') s.list = 'active';
+    return s;
   }
+  function writeJobsState(patch) {
+    var s = Object.assign(jobsState(), patch);
+    try { localStorage.setItem(JOBS_KEY, JSON.stringify(s)); } catch (e) {}
+    return s;
+  }
+  function shownJobs(list) { return list === 'done' ? completedJobs() : jobsList(); }
+  function selectedJob() {
+    var s = jobsState(), jobs = shownJobs(s.list);
+    return jobs.filter(function (j) { return j.id === s[s.list]; })[0] || jobs[0] || null;
+  }
+  // show this job, in whichever list it's in
+  function selectJob(id) {
+    var it = Store.byId(id);
+    if (!it) return;
+    var list = it.archived_at ? 'done' : 'active', p = { list: list };
+    p[list] = id;
+    writeJobsState(p);
+    render();
+    var m = $('#jobs-main');
+    if (m) m.scrollTop = 0;
+  }
+  function toggleJob(id) { selectJob(id); }
 
   // a tap or click anywhere outside the open row closes it
   function tapLeavesOpenRow(target) {
@@ -916,10 +942,10 @@
     if (a && a.blur && a.closest && a.closest('#view-todo')) a.blur();
     closeNotePop(); closeDatePop();
     try { window.getSelection().removeAllRanges(); } catch (err) {}
-    openJobs[id] = true;
+    writeJobsState({ list: 'active', active: id });
     openRowId = null;
     switchTab('jobs');
-    scrollToIn('#jobs', id);
+    scrollToIn('#jobs-list', id);
   }
   document.addEventListener('dblclick', function (e) {
     var t = e.target;
@@ -1259,83 +1285,203 @@
     var pos = jobsSectionSlot();
     if (pos == null) return null;
     var j = Store.newItem({ kind: 'task', is_job: true, name: '', position: pos, extra_notes: [], job_notes: '' });
-    openJobs[j.id] = true;
+    writeJobsState({ list: 'active', active: j.id });
     render();
     var el = document.querySelector('#jobs [data-id="' + j.id + '"][data-field="name"]');
-    if (el) { el.focus(); if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); }
+    if (el) el.focus();
+    scrollToIn('#jobs-list', j.id);
     return j;
   }
 
+  /* The Jobs tab (1.15): a list of jobs and the one that's open. On a wide
+     screen the list sits down the left and the job fills the right; on a
+     phone the job is the top part and the list the bottom, with a divider
+     between them to drag. Active / Completed at the top of the list picks
+     which jobs it shows. The open job is drawn by jobEl, as before. */
   function renderJobs() {
     var box = $('#jobs');
     if (!box) return;
+    var st = jobsState();
+    var active = jobsList(), done = completedJobs();
+    var jobs = st.list === 'done' ? done : active;
+    var sel = selectedJob();
+
+    $$('#jobs-seg .jseg-btn').forEach(function (b) {
+      var on = b.dataset.list === st.list;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    $('#jobs-n-active').textContent = active.length || '';
+    $('#jobs-n-done').textContent = done.length || '';
+    $('#job-add').hidden = st.list === 'done';
+
+    // The list. Not rebuilt mid-drag (the rows on screen are what's measured),
+    // nor when nothing in it has changed: a row swapped for a fresh copy
+    // between a finger landing and lifting loses the tap, and every edit or
+    // sync redraws the page.
+    var lbox = $('#jobs-list');
+    var sig = st.list + '|' + (sel ? sel.id : '') + '|' +
+      jobs.map(function (j) { return j.id + ':' + (j.name || ''); }).join('|');
+    if (!lbox.__drag && lbox.__sig !== sig) {
+      lbox.__sig = sig;
+      lbox.innerHTML = '';
+      jobs.forEach(function (j, i) { lbox.appendChild(jobRowEl(j, i, st.list === 'done', sel)); });
+      if (!jobs.length) {
+        var none = document.createElement('p');
+        none.className = 'jobs-none muted small';
+        none.textContent = st.list === 'done' ? 'No completed jobs yet.' : 'No jobs yet.';
+        lbox.appendChild(none);
+      }
+    }
+
+    // The open job. render() puts the cursor back after rebuilding it.
     box.innerHTML = '';
+    $('#jobs-empty').hidden = !!sel;
+    if (!sel) {
+      $('#jobs-empty-t').textContent = st.list === 'done' ? 'No completed jobs.' : 'No jobs yet.';
+      $('#jobs-empty-m').textContent = st.list === 'done'
+        ? 'A job you take off the todo list lands here, details and tasks kept, for looking back on.'
+        : 'Each job keeps its details and its tasks together, and shows in your todo list as one item.';
+      return;
+    }
+    box.appendChild(jobEl(sel, st.list === 'done'));
+  }
+
+  // one line in the list: a grip (active jobs only) and the name
+  function jobRowEl(j, i, done, sel) {
+    var el = document.createElement('div');
+    el.className = 'jrow' + (done ? ' done' : '') + (sel && sel.id === j.id ? ' sel' : '');
+    el.dataset.id = j.id;
+    el.dataset.i = i;
+    if (!done) {
+      // its own class, not .handle: the list's drag claims every .handle
+      var grip = document.createElement('span');
+      grip.className = 'jgrip'; grip.innerHTML = svgGrip;
+      grip.title = 'Drag to reorder';
+      jobDrag(grip, el);
+      el.appendChild(grip);
+    }
+    var nm = document.createElement('span');
+    nm.className = 'jrow-name' + ((j.name || '').trim() ? '' : ' untitled');
+    nm.textContent = (j.name || '').trim() || 'Untitled job';
+    el.appendChild(nm);
+    el.addEventListener('click', function (e) {
+      if (e.target.closest('.jgrip')) return;
+      selectJob(j.id);
+    });
+    return el;
+  }
+
+  /* Reordering in the list (1.15). As with the presets (1.11), nothing moves
+     until release — a line in the gap shows where it will land — and only the
+     grip drags, so a swipe on the list still scrolls it. The order is the
+     todo list's own: the job moves there too. */
+  function jobDrag(grip, el) {
+    grip.addEventListener('pointerdown', function (e) {
+      var box = $('#jobs-list');
+      if (e.button !== 0 || box.__drag) return;
+      e.preventDefault();
+      var id = e.pointerId, from = Number(el.dataset.i), to = null;
+      box.__drag = true;
+      try { box.setPointerCapture(id); } catch (x) {}
+      el.classList.add('dragging');
+      document.body.classList.add('dragging-active');
+
+      function mark(target, after) {
+        $$('.jrow', box).forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
+        if (target) target.classList.add(after ? 'drop-after' : 'drop-before');
+      }
+      function move(ev) {
+        if (ev.pointerId !== id) return;
+        // near the top or bottom edge, scroll the list along
+        var br = box.getBoundingClientRect();
+        if (ev.clientY < br.top + 28) box.scrollTop -= 12;
+        else if (ev.clientY > br.bottom - 28) box.scrollTop += 12;
+        var rows = $$('.jrow', box), best = null, bd = Infinity;
+        rows.forEach(function (r) {
+          var rr = r.getBoundingClientRect();
+          var d = Math.abs(ev.clientY - (rr.top + rr.height / 2));
+          if (d < bd) { bd = d; best = r; }
+        });
+        if (!best) { to = null; mark(null); return; }
+        var r = best.getBoundingClientRect();
+        var after = ev.clientY > r.top + r.height / 2;
+        var at = Number(best.dataset.i) + (after ? 1 : 0);   // a slot between rows, 0..n
+        if (at === from || at === from + 1) { to = null; mark(null); return; }
+        to = at;
+        mark(best, after);
+      }
+      function end(ev) {
+        if (ev && ev.pointerId !== undefined && ev.pointerId !== id) return;
+        box.removeEventListener('pointermove', move);
+        box.removeEventListener('pointerup', end);
+        box.removeEventListener('pointercancel', end);
+        box.removeEventListener('lostpointercapture', end);
+        box.__drag = false;
+        el.classList.remove('dragging');
+        document.body.classList.remove('dragging-active');
+        mark(null);
+        if (to === null || !el.isConnected || (ev && ev.type === 'pointercancel')) { render(); return; }
+        moveJob(el.dataset.id, to);
+      }
+      box.addEventListener('pointermove', move);
+      box.addEventListener('pointerup', end);
+      box.addEventListener('pointercancel', end);
+      box.addEventListener('lostpointercapture', end);
+    });
+  }
+
+  // put a job at slot `to` (0..n) of the active jobs, by moving it in the list
+  function moveJob(id, to) {
     var jobs = jobsList();
-    $('#jobs-empty').hidden = jobs.length > 0;
-    jobs.forEach(function (j) { box.appendChild(jobEl(j)); });
-    renderDoneJobs();
+    var from = jobs.findIndex(function (j) { return j.id === id; });
+    if (from < 0) return;
+    var rest = jobs.filter(function (j) { return j.id !== id; });
+    var at = to > from ? to - 1 : to;
+    var beforeId;
+    if (at < rest.length) beforeId = rest[at].id;
+    else {
+      // after the last job: before whatever follows it in the list
+      var all = active().filter(function (x) { return x.id !== id; });
+      var li = all.indexOf(rest[rest.length - 1]);
+      beforeId = li >= 0 && all[li + 1] ? all[li + 1].id : null;
+    }
+    commitDrag([id], beforeId);
   }
 
-  /* Completed jobs (1.14): jobs taken off the todo list, kept for reviews.
-     Folded shut under a band with a count; each opens like any job, still
-     editable, with Reopen (back into the Jobs section) and Delete for good. */
-  var doneOpen = false;
-  function renderDoneJobs() {
-    var box = $('#jobs-done');
-    if (!box) return;
-    box.innerHTML = '';
-    var done = completedJobs();
-    if (!done.length) return;
-    var head = document.createElement('button');
-    head.type = 'button';
-    head.className = 'done-head' + (doneOpen ? ' open' : '');
-    head.setAttribute('aria-expanded', doneOpen ? 'true' : 'false');
-    head.innerHTML = '<span class="caret">' + svgCaret + '</span>';
-    var title = document.createElement('span');
-    title.className = 'done-title'; title.textContent = 'Completed';
-    var count = document.createElement('span');
-    count.className = 'count'; count.textContent = done.length;
-    head.append(title, count);
-    head.onclick = function () { doneOpen = !doneOpen; renderDoneJobs(); };
-    box.appendChild(head);
-    if (!doneOpen) return;
-    done.forEach(function (j) { box.appendChild(jobEl(j, true)); });
-  }
-
-  /* A job is drawn from the same parts as the todo list, so the two tabs
-     read as one app: a section-style band for the name, a white card below
-     it, the tracker grid's small caps labels, row lines for the tasks with
-     the same highlighter notes, and the list's own quiet "+ task". */
+  /* The open job is drawn from the same parts as the todo list, so the two
+     tabs read as one app: a section-style band for the name, a white card
+     below it, the tracker grid's small caps labels, row lines for the tasks
+     with the same highlighter notes, and the list's own quiet "+ task". */
   function jobEl(j, done) {
-    var open = !!openJobs[j.id];
     var tasks = noteTexts(j);
 
     var el = document.createElement('div');
-    el.className = 'jobcard' + (open ? ' open' : '') + (done ? ' done' : '');
+    el.className = 'jobcard open' + (done ? ' done' : '');
     el.dataset.id = j.id;
 
     var head = document.createElement('div');
     head.className = 'job-head';
-
-    var caret = document.createElement('button');
-    caret.type = 'button'; caret.className = 'caret'; caret.innerHTML = svgCaret;
-    caret.setAttribute('aria-label', open ? 'Close job' : 'Open job');
-    caret.setAttribute('aria-expanded', open ? 'true' : 'false');
-    caret.onclick = function (e) { e.stopPropagation(); toggleJob(j.id); };
 
     var name = document.createElement('input');
     name.className = 'job-name'; name.value = j.name || ''; name.placeholder = 'Job name';
     name.dataset.id = j.id; name.dataset.field = 'name';
     bindText(name, j.id, 'name');
     name.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); name.blur(); } });
+    name.addEventListener('input', function () {
+      // the list shows the name as you type it
+      var r = document.querySelector('#jobs-list .jrow[data-id="' + j.id + '"] .jrow-name');
+      if (r) { r.textContent = name.value.trim() || 'Untitled job'; r.classList.toggle('untitled', !name.value.trim()); }
+    });
     // a job started and abandoned with nothing in it shouldn't linger
     name.addEventListener('blur', function () {
       setTimeout(function () {
-        if (el.contains(document.activeElement)) return;
+        if (el.isConnected && el.contains(document.activeElement)) return;
         var cur = Store.byId(j.id);
         if (!cur || cur.archived_at) return;
         if ((cur.name || '').trim() || (cur.job_notes || '').trim() || hasAnyNote(cur)) return;
         Store.hardDelete(cur.id);
+        render();
       }, 80);
     });
 
@@ -1349,7 +1495,16 @@
     var del = document.createElement('button');
     del.type = 'button'; del.className = 'delbtn'; del.innerHTML = svgX;
     del.setAttribute('aria-label', done ? 'Delete job for good' : 'Delete job');
-    del.onclick = function (e) { e.stopPropagation(); done ? deleteDoneJob(j) : deleteItem(j); };
+    del.title = done ? 'Delete for good' : 'Take off the list — kept under Completed';
+    del.onclick = function (e) {
+      e.stopPropagation();
+      if (done) { deleteDoneJob(j); return; }
+      // the job below it (or above, at the end) is shown next
+      var jobs = jobsList(), i = jobs.findIndex(function (x) { return x.id === j.id; });
+      var next = jobs[i + 1] || jobs[i - 1];
+      writeJobsState({ active: next ? next.id : null });
+      deleteItem(j);
+    };
 
     var when = null;
     if (done) {
@@ -1359,16 +1514,10 @@
       var at = new Date(j.archived_at);
       when.textContent = 'completed ' + fmtDate(at.getFullYear() + '-' + pad(at.getMonth() + 1) + '-' + pad(at.getDate()));
     }
-    head.append(caret, name, count);
+    head.append(name, count);
     if (when) head.appendChild(when);
     head.appendChild(del);
-    head.addEventListener('click', function (e) {
-      if (e.target.closest('button')) return;
-      if (e.target === name && (open || !touchUI())) return;   // editing the name
-      toggleJob(j.id);
-    });
     el.appendChild(head);
-    if (!open) return el;
 
     var card = document.createElement('div');
     card.className = 'job-body';
@@ -1406,6 +1555,7 @@
       reopen.title = 'Put it back in the Jobs section of the todo list';
       reopen.onclick = function () {
         Store.restore(j.id, jobsSectionSlot());
+        writeJobsState({ list: 'active', active: j.id });
         render();
         toast('“' + (j.name || 'Untitled').slice(0, 40) + '” is back in the Jobs section.');
       };
@@ -1424,6 +1574,61 @@
     card.append(dl, details, tl, list, foot);
     el.appendChild(card);
     return el;
+  }
+
+  /* The divider between the job and the list, on a phone: drag it to give
+     either more room. Per device, kept with theme and text size. */
+  var JOBS_TOP_DEFAULT = 50;
+  function jobsTop() {
+    var v = parseFloat(readDisplay().jobs_top);
+    return (v >= 20 && v <= 80) ? v : JOBS_TOP_DEFAULT;
+  }
+  function applyJobsTop() {
+    var s = $('#jobs-split');
+    if (s) s.style.setProperty('--jobs-top', jobsTop() + '%');
+  }
+  function wireJobs() {
+    $$('#jobs-seg .jseg-btn').forEach(function (b) {
+      b.onclick = function () { writeJobsState({ list: b.dataset.list }); render(); var m = $('#jobs-main'); if (m) m.scrollTop = 0; };
+    });
+    $('#job-add').onclick = function () { createJob(); };
+    applyJobsTop();
+
+    var h = $('#jobs-handle'), s = $('#jobs-split'), dragId = null;
+    function end() {
+      if (dragId === null) return;
+      dragId = null;
+      h.classList.remove('dragging');
+      document.body.classList.remove('dragging-active');
+      var v = parseFloat(s.style.getPropertyValue('--jobs-top'));
+      if (v) writeDisplay({ jobs_top: Math.round(v * 10) / 10 });
+    }
+    // pointer capture, and lostpointercapture ends it however it ends (trap 5)
+    h.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragId = e.pointerId;
+      try { h.setPointerCapture(e.pointerId); } catch (x) {}
+      h.classList.add('dragging');
+      document.body.classList.add('dragging-active');
+    });
+    h.addEventListener('pointermove', function (e) {
+      if (dragId === null || e.pointerId !== dragId) return;
+      // the job's share of the height the two parts have (the padding that
+      // clears the phone's tab bar isn't theirs)
+      var r = s.getBoundingClientRect();
+      var hgt = r.height - (parseFloat(getComputedStyle(s).paddingBottom) || 0);
+      if (hgt <= 0) return;
+      var v = Math.max(20, Math.min(80, (e.clientY - r.top) / hgt * 100));
+      s.style.setProperty('--jobs-top', v.toFixed(1) + '%');
+    });
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+    h.addEventListener('lostpointercapture', end);
+    h.addEventListener('dblclick', function () {
+      writeDisplay({ jobs_top: JOBS_TOP_DEFAULT });
+      applyJobsTop();
+    });
   }
 
   function deleteDoneJob(j) {
@@ -3548,6 +3753,8 @@
     $('#fab').hidden = (name !== 'todo');
     // the date toggle only means anything on the todo list
     $('#btn-dates').hidden = (name !== 'todo');
+    // the Jobs tab's two parts scroll on their own, so the page itself doesn't
+    document.body.classList.toggle('jobs-on', name === 'jobs');
     if (name === 'jobs') { renderJobs(); $$('#jobs textarea').forEach(autoGrow); }
     if (name === 'todo') $$('#list textarea').forEach(autoGrow);
     if (name === 'overview') renderOverview();
@@ -3577,7 +3784,7 @@
 
     wireConfirm();
     wireArchive();
-    $('#job-add').onclick = function () { createJob(); };
+    wireJobs();
     $('#btn-dates').onclick = function () {
       var hide = readDisplay().dates !== 'hide';
       writeDisplay({ dates: hide ? 'hide' : 'show' });
@@ -4359,7 +4566,7 @@
     askConfirm: askConfirm, fillArchive: fillArchive, parseVersion: parseVersion,
     toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, completedJobs: completedJobs,
     restoreItem: restoreItem, restoreSlot: restoreSlot, commitDrag: commitDrag, healJobs: healJobs,
-    archived: archived, setDoneOpen: function (v) { doneOpen = !!v; }, paintStatus: paintStatus,
+    archived: archived, setJobsList: function (v) { writeJobsState({ list: v }); render(); }, selectJob: selectJob, selectedJob: selectedJob, moveJob: moveJob, jobsSectionSlot: jobsSectionSlot, paintStatus: paintStatus,
     ensureJobsSection: ensureJobsSection, touchUI: touchUI, closeOpenRow: closeOpenRow,
     openRow: function () { return openRowId; },
     extraNotes: extraNotes, noteTexts: noteTexts, getNote: getNote, setNote: setNote, NUM_MAX: NUM_MAX,

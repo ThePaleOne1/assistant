@@ -130,7 +130,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   still editable; **Reopen** puts it back in the Jobs section; × there deletes for
   good, asked first). Completed jobs are **not** in the Archive (`archived()` leaves
   out `is_job`), so its bulk delete can't take them. Jobs archived before 1.14 show
-  up there too.
+  up there too. (1.15 replaced the band with an Active / Completed switch.)
 - **Restore goes back to its section.** Deleting records `archived_section` (08); the
   Archive's Restore (`restoreItem` / `restoreSlot`) puts it back at its old spot if
   that's still inside the section, else the bottom of the section; section deleted →
@@ -141,7 +141,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   on the next section's heading (it was where the drop landed — only the line was
   wrong). Moving a whole section still draws it on the heading it goes before.
 
-**v1.14.1 (built 29 Oct; not yet uploaded).** No SQL step.
+**v1.14.1 (live from 29 Oct — he uploaded it; confirmed fixed).** No SQL step.
 - **Fixed: his Jobs section wasn't the Jobs section.** On the live 1.14 nothing in
   his "Jobs" section became a job — not what was there, not "+ task", not drags in.
   1.14 recognised only the heading whose id is `prefs.jobs_section_id`; his "Jobs"
@@ -149,8 +149,34 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   named "Jobs"** (any case), and `findJobsHeader` adopts the first such heading as
   the one on record when the recorded one is missing or deleted (copying the old
   presets across, or the Jobs defaults). Trap 25.
+- On his devices this made a new "JOBS" heading (his old one evidently wasn't named
+  "Jobs" — the app made one when it needed one). He dragged his jobs into it; no
+  duplicates, all linked. His old heading is his to delete or keep.
 
-Current version is **1.14.1** (see `config.js`); **1.14** is what's live.
+**v1.15 (built 29 Oct; not yet uploaded).** No SQL step. Asked with the question tool:
+draggable divider on the phone, open on the last job, names only in the list, drag on
+both.
+- **The Jobs tab is a list and an open job.** Wide screens (760px+): the list down the
+  left (300px), the open job on the right, each scrolling on its own. Narrower: the
+  open job on top, the list underneath, a divider between them to drag (20–80%,
+  double-tap resets to 50%; `jobs_top` in `assist:display`, per device). At the top
+  of the list, **Active / Completed** (counts) and **+ Job** (hidden on Completed).
+- **The list** is names only, in the todo list's order, the open one marked in the
+  accent colour. Active jobs have a grip (`.jgrip`, not `.handle` — trap 1) to drag;
+  as with presets, nothing moves until release, a line shows where it lands, and it
+  moves in the todo list too (`moveJob` → `commitDrag`). Only the grip drags, so the
+  list still scrolls with a finger. Completed: newest first, no grips.
+- **Which job is open** is per device, never synced (`assist:jobs`: the list shown,
+  and the last job open in each). Gone → the first in its list. × on the open job
+  sends it to Completed and opens the one after it. Reopen and "Open in Jobs →" open
+  it in Active. The open job is drawn by `jobEl` as before, minus the caret.
+- **Fixed: on the phone, an open todo row's notes took half the width** (191 of
+  399px) — beside the date and ×, which are wide at Large text. Under 480px the open
+  row's `.body` is `display: contents`, so the name stays on the first line with the
+  buttons and the notes run full width underneath, lined up with the name. Wider
+  screens unchanged.
+
+Current version is **1.15** (see `config.js`); **1.14.1** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -170,10 +196,10 @@ colours to his own choices — leave them alone unless he asks.
 
 As of 29 October 2026.
 
-**To ship 1.14.1:** upload (see Uploading — he often runs the script himself),
-confirm the live `config.js` says `1.14.1`, then Settings → Check for updates on both
-devices, and ask him whether everything in his Jobs section is now on the Jobs tab.
-Every SQL file, 01–08, has been run (08 confirmed 29 Oct). Optional tidy: delete
+**To ship 1.15:** upload (see Uploading — he often runs the script himself),
+confirm the live `config.js` says `1.15`, then Settings → Check for updates on both
+devices. Ask him how the phone's divider and list feel in real use, and whether the
+Jobs tab looks right in Firefox (layout only checked in Chromium). Every SQL file, 01–08, has been run (08 confirmed 29 Oct). Optional tidy: delete
 `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
 **After 1.9 (live 2 Oct), still to confirm with him:** both devices updated, the
@@ -214,18 +240,22 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 29 October 2026 against v1.14.1, on the work PC:
+Run on 29 October 2026 against v1.15, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **376/376 desktop, 360/360 tablet and phone** (side by side is desktop-only) |
-| Real-touch probes (phone only) | **61/61** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **404/404 desktop, 392/392 tablet, 393/393 phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **69/69** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
 
 1.14's fixes were each undone in turn (the drop line, `healJobs`, recording the
 section on ×) and the suite failed every time. For 1.14.1, putting back the id-only
-check fails 9 checks at every viewport (test 11g2, a hand-made "Jobs" heading).
+check fails 9 checks at every viewport (test 11g2, a hand-made "Jobs" heading). For
+1.15, undoing the open row's `display: contents` fails 3 checks on the phone only
+(11g3); the Jobs tab's layout, list, drag and divider are checked at every viewport
+and by fingertip on the phone (tap to open, grip drag, swipe doesn't drag, divider).
+The DOM suite was run five times in a row green after trap 26's fix.
 
 The preset-tap probe was run against the 1.11 `app.js` too: it caught the chips at
 (8, 6), the top-left corner — his bug, reproduced.
@@ -728,6 +758,15 @@ These all cost real debugging time. Each has a regression test now.
     app, so it was always the one on record, and his own "Jobs" heading never was.
     Match a section he'd recognise by name as well as by id (`isJobsHeader`), and
     when writing a test, ask what his real list looks like that the fixture doesn't.
+
+26. **In the touch probes, a swipe leaves a fling that eats the next tap.** After the
+    preset probe's sideways swipe, a fingertip tap in the Jobs list sent pointerdown,
+    pointerup and touchend but never a click — about half the runs, then every run.
+    A real phone does the same (a tap during a fling just stops it), but headless
+    Chrome never lets the fling run down, so waiting doesn't help. Spend one tap
+    somewhere harmless after a swipe (`tap_el('.appbar-title')`). Logging the event
+    sequence is what showed it; two wrong theories (a redraw mid-tap, frame timing)
+    were ruled out first. A fresh page tapped fine every time.
 
 ---
 

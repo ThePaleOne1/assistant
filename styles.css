@@ -623,32 +623,109 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
    section's rows, its labels are the tracker grid's small caps, its tasks
    are row lines carrying the same highlighter notes, and "+ task" is the
    list's own quiet add-link. */
-.jobs-wrap { padding: 6px 0 0; }
-.jobcard { margin: 14px var(--list-gutter) 0; }
-.jobcard:first-child { margin-top: 6px; }
-.job-head {
-  display: flex; align-items: center; gap: 2px;
-  padding: 0 10px 0 2px;
-  min-height: calc(var(--tap) + 2px);
-  background: var(--band);
+/* 1.15: a list of jobs and the open one. On a wide screen the list runs
+   down the left and the job fills the right; on a phone the job is the top
+   part and the list the bottom, with a divider to drag between them. The
+   page doesn't scroll on this tab — each part scrolls on its own. */
+body.jobs-on main { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+body.jobs-on #view-jobs.active { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.jobs-split { display: flex; flex: 1 1 auto; min-height: 0; width: 100%; }
+.jobs-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.jobs-side-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; flex: none; }
+.jobs-seg { margin: 0; flex: 1 1 auto; }
+/* drawn as the tracker's Log / Insights switch, under its own class: the
+   tracker's code reaches for every .seg-btn (trap 1) */
+.jseg-btn {
+  flex: 1 1 0;
+  padding: 7px 10px;
+  font: inherit; font-size: var(--fs-sm); font-weight: 500;
+  color: var(--muted);
+  background: none; border: 0; border-radius: 7px; cursor: pointer;
+  white-space: nowrap;
+}
+.jseg-btn.active { color: var(--text); background: var(--surface); box-shadow: var(--shadow); }
+.jseg-btn .n { font-size: var(--fs-xs); font-weight: 600; color: var(--faint); margin-left: 2px; }
+.jobs-side-head #job-add { flex: none; }
+/* the list: the todo list's white card and row lines, as tall as it needs,
+   scrolling past that */
+.jobs-list {
+  flex: 0 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  margin: 0 12px 12px;
+  background: var(--surface);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.jrow {
+  display: flex; align-items: center; gap: 2px;
+  min-height: var(--row-h);
+  padding: 0 10px 0 2px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
-.jobcard.open .job-head {
+.jrow:last-child { border-bottom: 0; }
+.jrow.done { padding-left: 12px; }
+.jrow:hover .jgrip { color: var(--faint); }
+.jrow.sel { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
+.jrow.sel .jrow-name { color: var(--accent); font-weight: 600; }
+.jrow-name {
+  flex: 1 1 auto; min-width: 0; padding: 6px 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jrow-name.untitled { color: var(--faint); }
+.jgrip {
+  display: grid; place-items: center; flex: none;
+  width: 22px; min-height: var(--row-h);
+  color: var(--border-2);
+  cursor: grab; touch-action: none;
+}
+.jgrip svg { width: 14px; height: 14px; stroke-width: 2.2; }
+.jrow.dragging { opacity: .45; }
+/* where a dragged job will land: a bar in the gap */
+.jrow.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
+.jrow.drop-after  { box-shadow: inset 0 -3px 0 var(--accent); }
+.jobs-none { margin: 0; padding: 12px 14px; }
+
+.jobs-main {
+  flex: 1 1 0; min-width: 0; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px 12px 24px;
+}
+.jobs-handle { display: none; }
+
+@media (min-width: 760px) {
+  .jobs-split { max-width: 1180px; margin-inline: auto; }
+  .jobs-side { flex: 0 0 300px; border-right: 1px solid var(--border); }
+  .jobs-side-head { padding-top: 14px; }
+  .jobs-main { padding: 14px 20px 40px; }
+}
+@media (max-width: 759.98px) {
+  .jobs-split { flex-direction: column; }
+  .jobs-main { order: 1; flex: 0 0 var(--jobs-top, 50%); }
+  .jobs-handle {
+    order: 2; display: flex; align-items: center; justify-content: center;
+    flex: 0 0 22px;
+    background: var(--surface);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    cursor: row-resize; touch-action: none;
+  }
+  .jobs-handle span { width: 44px; height: 4px; border-radius: 2px; background: var(--border-2); }
+  .jobs-handle.dragging span { background: var(--accent); }
+  .jobs-side { order: 3; flex: 1 1 0; }
+}
+@media (max-width: 680px) {
+  /* clear of the tab bar, which sits over the bottom of the screen */
+  .jobs-split { padding-bottom: calc(var(--tap) + 9px + var(--safe-b)); }
+}
+
+.job-head {
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 6px 0 12px;
+  min-height: calc(var(--tap) + 2px);
+  background: var(--band);
   border-radius: var(--radius) var(--radius) 0 0;
   border-bottom: 2px solid var(--border-2);
 }
-.job-head .caret {
-  display: grid; place-items: center; flex: none;
-  width: var(--tap); height: var(--tap);
-  color: var(--muted);
-  background: none; border: 0; cursor: pointer;
-}
-.job-head .caret svg {
-  width: calc(var(--fs-hdr) * 1.15); height: calc(var(--fs-hdr) * 1.15);
-  stroke-width: 2.8; transform: rotate(-90deg); transition: transform .15s ease;
-}
-.jobcard.open .job-head .caret svg { transform: none; }
 .job-name {
   flex: 1 1 auto; min-width: 0; width: auto;
   margin: 0; padding: 4px 2px;
@@ -666,33 +743,6 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 }
 .job-head:hover .delbtn { opacity: 1; color: var(--faint); }
 
-/* Completed jobs (1.14): a band like a section's, folded shut, below the
-   active jobs; the jobs inside are drawn as any job, a shade quieter. */
-.jobs-done { margin-top: 22px; }
-.done-head {
-  display: flex; align-items: center; gap: 2px; width: calc(100% - 2 * var(--list-gutter));
-  margin: 0 var(--list-gutter); padding: 0 10px 0 2px;
-  min-height: calc(var(--tap) + 2px);
-  font: inherit; text-align: left; color: var(--muted);
-  background: var(--band); border: 0; border-radius: var(--radius);
-  cursor: pointer;
-}
-.done-head .caret {
-  display: grid; place-items: center; flex: none; width: var(--tap); height: var(--tap);
-}
-.done-head .caret svg {
-  width: calc(var(--fs-hdr) * 1.15); height: calc(var(--fs-hdr) * 1.15);
-  stroke-width: 2.8; transform: rotate(-90deg); transition: transform .15s ease;
-}
-.done-head.open .caret svg { transform: none; }
-.done-title {
-  flex: 1 1 auto; font-size: var(--fs-hdr); font-weight: 800;
-  letter-spacing: .08em; text-transform: uppercase;
-}
-.done-head .count {
-  font-size: var(--fs-xs); font-weight: 600; color: var(--muted);
-  padding: 3px 9px; border-radius: 999px; background: var(--surface); flex: none;
-}
 .jobcard.done .job-name { color: var(--muted); }
 .done-when { flex: none; font-size: var(--fs-xs); color: var(--faint); margin: 0 6px; white-space: nowrap; }
 
@@ -745,7 +795,6 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
    click-to-edit. */
 @media (hover: none) and (pointer: coarse) {
   .row:not(.open) .body input { pointer-events: none; }
-  .jobcard:not(.open) .job-name { pointer-events: none; }
   /* a tap on the row does this button's job, so it only appears on the open
      row, as the way to close it */
   .row:not(.open) > .expbtn { display: none; }
@@ -1296,7 +1345,7 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
 
 /* ---------- Desktop tweaks ---------- */
 @media (min-width: 760px) {
-  .list, .list-foot, #overview, .jobs-wrap { max-width: 860px; margin-inline: auto; }
+  .list, .list-foot, #overview { max-width: 860px; margin-inline: auto; }
   :root { --list-gutter: 0px; }
   .appbar, .tabs, .searchbar { padding-inline: max(14px, calc((100vw - 860px) / 2)); }
   .fab { display: none; }
@@ -1451,4 +1500,20 @@ dialog::backdrop { background: rgba(0,0,0,.42); backdrop-filter: blur(2px); }
      note used to */
   .row .notes { flex: 1 1 100%; max-width: 100%; }
   .row.no-note .notes { flex: 0 1 auto; }
+
+  /* An open row's notes run the whole width of the row (1.15). Beside the
+     date and ×, which are wide at the phone's text size, they only had about
+     half. The text column steps aside (display: contents), so the name stays
+     on the first line with the buttons and the notes wrap under all of it,
+     lined up with the name. Events still pass through .body as before. */
+  .row.open > .body { display: contents; }
+  .row.open .name, .row.open textarea.name {
+    order: 1; flex: 1 1 0; min-width: 0; max-width: none;
+    margin-top: calc((var(--row-h) - var(--fs-md) * 1.45 - 2px) / 2);
+  }
+  .row.open > .expbtn, .row.open > .duebtn, .row.open > .delbtn { order: 2; }
+  .row.open .notes {
+    order: 3; flex: 1 1 100%; max-width: none; min-width: 0;
+    margin: 0 6px 7px calc(var(--tap) - 8px);
+  }
 }

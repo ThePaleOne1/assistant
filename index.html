@@ -137,18 +137,27 @@
 
     <!-- Jobs -->
     <div class="view" id="view-jobs">
-      <div class="jobs-wrap">
-        <div id="jobs"></div>
-        <div id="jobs-empty" class="list-empty" hidden>
-          <p>No jobs yet.</p>
-          <p class="muted">Each job keeps its details and its tasks together, and shows in your todo list as one item.</p>
-        </div>
-        <div class="list-foot">
-          <button class="btn ghost small" id="job-add" type="button">+ Job</button>
-        </div>
-        <div id="jobs-done" class="jobs-done"></div>
+      <!-- 1.15: the list of jobs beside (PC) or under (phone) the open one -->
+      <div class="jobs-split" id="jobs-split">
+        <aside class="jobs-side">
+          <div class="jobs-side-head">
+            <div class="seg jobs-seg" id="jobs-seg">
+              <button class="jseg-btn active" type="button" data-list="active">Active <span class="n" id="jobs-n-active"></span></button>
+              <button class="jseg-btn" type="button" data-list="done">Completed <span class="n" id="jobs-n-done"></span></button>
+            </div>
+            <button class="btn ghost small" id="job-add" type="button">+ Job</button>
+          </div>
+          <div class="jobs-list" id="jobs-list"></div>
+        </aside>
+        <div class="jobs-handle" id="jobs-handle" title="Drag to resize · double-tap to reset"><span></span></div>
+        <section class="jobs-main" id="jobs-main">
+          <div id="jobs"></div>
+          <div id="jobs-empty" class="list-empty" hidden>
+            <p id="jobs-empty-t">No jobs yet.</p>
+            <p class="muted" id="jobs-empty-m">Each job keeps its details and its tasks together, and shows in your todo list as one item.</p>
+          </div>
+        </section>
       </div>
-      <div class="scroll-pad"></div>
     </div>
 
     <!-- Time log -->
