@@ -810,7 +810,8 @@
       return null;
     },
 
-    archive: function (id) { return Store.update(id, { archived_at: nowIso() }); },
+    // `extra` carries archived_section (1.14): which section it was deleted from.
+    archive: function (id, extra) { return Store.update(id, Object.assign({ archived_at: nowIso() }, extra || {})); },
     restore: function (id, position) {
       var p = { archived_at: null };
       if (position != null) p.position = position;

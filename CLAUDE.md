@@ -6,8 +6,8 @@ fresh chat can pick up without re-deriving everything.
 Named `CLAUDE.md` because that's the file a Claude session looks for in a project
 folder. Nothing in here is secret — it's safe in the public repo.
 
-**Last verified: 7 October 2026.** Everything below was checked rather than
-carried forward on trust: the code facts and test runs on 7 October, the live site on 6 October. If you're reading this much later, the facts are
+**Last verified: 29 October 2026.** Everything below was checked rather than
+carried forward on trust: the code facts, test runs and live site on 29 October. If you're reading this much later, the facts are
 probably still right, but a "verified" claim is only as good as its date — and this
 file has twice carried a limitation that had quietly stopped being true. Test before
 believing one.
@@ -112,14 +112,36 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   the chips jumping to the top-left corner for a moment after a pick — trap 23.
   The row stays open.
 
-**v1.13 (built 20 Oct; not yet uploaded).** No SQL step.
+**v1.13 (live from 20 Oct — he uploaded it).** No SQL step.
 - **Double-click (double-tap on the phone) a job in the todo list** — anywhere on
   its row, name and notes included — opens it on the Jobs tab, the same as its
   "Open in Jobs →" link (`openInJobs`). His choice over keeping double-click for
   selecting a word; single click/tap still edits. On a job row the phone's
   double-tap no longer opens-and-edits. The date, × and grip are left out.
 
-Current version is **1.13** (see `config.js`); **1.12** is what's live.
+**v1.14 (built 29 Oct; not yet uploaded). Needs `supabase/08_archived_section.sql` first.**
+- **The Jobs section and the Jobs tab are one thing.** Any task under the Jobs heading
+  is a job: added there, made there with Enter, dragged in, or already sitting there
+  (`healJobs`, run as the list draws — one way only). Dragged *out*, it's an ordinary
+  task again (`commitDrag`; its Details stay on the item, unseen). Done by drag only,
+  so deleting or moving the Jobs heading can't quietly un-job everything.
+- **Completed jobs.** A job taken off the list (×) is archived as before, but it's
+  kept on the Jobs tab under a folded **Completed** band (count; "completed 29/10";
+  still editable; **Reopen** puts it back in the Jobs section; × there deletes for
+  good, asked first). Completed jobs are **not** in the Archive (`archived()` leaves
+  out `is_job`), so its bulk delete can't take them. Jobs archived before 1.14 show
+  up there too.
+- **Restore goes back to its section.** Deleting records `archived_section` (08); the
+  Archive's Restore (`restoreItem` / `restoreSlot`) puts it back at its old spot if
+  that's still inside the section, else the bottom of the section; section deleted →
+  bottom of the list with a toast saying so; deleted before 1.14 (no record) → its old
+  spot. A blank row in the Jobs section is still dropped when abandoned (it would
+  otherwise linger as an empty completed job).
+- **The drag line** at the end of a section sits under that section's last item, not
+  on the next section's heading (it was where the drop landed — only the line was
+  wrong). Moving a whole section still draws it on the heading it goes before.
+
+Current version is **1.14** (see `config.js`); **1.13** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -137,11 +159,13 @@ colours to his own choices — leave them alone unless he asks.
 
 ### Outstanding
 
-As of 20 October 2026.
+As of 29 October 2026.
 
-**To ship 1.13:** upload (see Uploading — he often runs the script himself), confirm
-the live `config.js` says `1.13`, then Settings → Check for updates on both devices.
-Every SQL file has been run (07 confirmed 6 Oct). Optional tidy: delete
+**To ship 1.14:** **run `supabase/08_archived_section.sql` first** (adds
+`items.archived_section`; until it's run, deleting a task is rejected — "Needs DB
+update", the toast names 08 — and waits on the device). Then upload (see Uploading —
+he often runs the script himself), confirm the live `config.js` says `1.14`, then
+Settings → Check for updates on both devices. 01–07 have all been run. Optional tidy: delete
 `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
 **After 1.9 (live 2 Oct), still to confirm with him:** both devices updated, the
@@ -182,14 +206,17 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 20 October 2026 against v1.13, on the work PC:
+Run on 29 October 2026 against v1.14, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **334/334 desktop, 318/318 tablet and phone** (side by side is desktop-only) |
-| Real-touch probes (phone only) | **59/59** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
+| DOM (`tools/run-dom-tests.py`) | **365/365 desktop, 349/349 tablet and phone** (side by side is desktop-only) |
+| Real-touch probes (phone only) | **61/61** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
+
+1.14's fixes were each undone in turn (the drop line, `healJobs`, recording the
+section on ×) and the suite failed every time.
 
 The preset-tap probe was run against the 1.11 `app.js` too: it caught the chips at
 (8, 6), the top-left corner — his bug, reproduced.
@@ -347,7 +374,7 @@ Work PC      ─┘      • todo + time log          │
 | `sb.js` | Data layer: auth, sync, offline outbox, realtime. |
 | `config.js` | Supabase URL + publishable key, `ALLOW_SIGNUP`, `VERSION`. |
 | `sw.js` | Service worker. Network-first, cache as offline fallback. |
-| `supabase/01–07*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub), note numbers (`07_note_numbers.sql`). |
+| `supabase/01–08*.sql` | Schema, reminders, time log, history seed, end-times migration, extra notes + jobs columns (`06_jobs_notes.sql`; `06_subtasks_jobs.sql` is a superseded stub), note numbers (`07_note_numbers.sql`), the section a deleted item came from (`08_archived_section.sql`). |
 | `tools/` | Dev only: mock store, preview builder, the three test suites, the DOM runner, seed data. |
 
 `Reference/` (the original spreadsheet) is no longer in this folder — gone by 25 Sep.
@@ -681,6 +708,11 @@ These all cost real debugging time. Each has a regression test now.
     copy. `positionPop` now ignores an anchor that isn't in the page; and picking a
     preset now closes the chips and ends the edit anyway (1.12). A real-touch probe
     records every position the chips take during a pick.
+
+24. **A stored timestamp is UTC; a date shown to him is Newcastle's.** "Completed"
+    dates first came from `archived_at.slice(0, 10)` — the UTC date, a day behind
+    before 10–11am. Only a screenshot taken in the morning showed it. Build the date
+    from `new Date(iso)`'s local parts (as the completed-job card now does).
 
 ---
 

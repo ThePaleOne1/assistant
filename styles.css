@@ -666,6 +666,36 @@ main { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 }
 .job-head:hover .delbtn { opacity: 1; color: var(--faint); }
 
+/* Completed jobs (1.14): a band like a section's, folded shut, below the
+   active jobs; the jobs inside are drawn as any job, a shade quieter. */
+.jobs-done { margin-top: 22px; }
+.done-head {
+  display: flex; align-items: center; gap: 2px; width: calc(100% - 2 * var(--list-gutter));
+  margin: 0 var(--list-gutter); padding: 0 10px 0 2px;
+  min-height: calc(var(--tap) + 2px);
+  font: inherit; text-align: left; color: var(--muted);
+  background: var(--band); border: 0; border-radius: var(--radius);
+  cursor: pointer;
+}
+.done-head .caret {
+  display: grid; place-items: center; flex: none; width: var(--tap); height: var(--tap);
+}
+.done-head .caret svg {
+  width: calc(var(--fs-hdr) * 1.15); height: calc(var(--fs-hdr) * 1.15);
+  stroke-width: 2.8; transform: rotate(-90deg); transition: transform .15s ease;
+}
+.done-head.open .caret svg { transform: none; }
+.done-title {
+  flex: 1 1 auto; font-size: var(--fs-hdr); font-weight: 800;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.done-head .count {
+  font-size: var(--fs-xs); font-weight: 600; color: var(--muted);
+  padding: 3px 9px; border-radius: 999px; background: var(--surface); flex: none;
+}
+.jobcard.done .job-name { color: var(--muted); }
+.done-when { flex: none; font-size: var(--fs-xs); color: var(--faint); margin: 0 6px; white-space: nowrap; }
+
 .job-body {
   background: var(--surface);
   border-radius: 0 0 var(--radius) var(--radius);

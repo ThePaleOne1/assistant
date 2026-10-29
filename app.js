@@ -343,7 +343,7 @@
       : 'Sync status';
     if (s === 'error' && Store.schemaBehind && !paintStatus.warned) {
       paintStatus.warned = true;
-      toast('Database needs updating: run supabase/07_note_numbers.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
+      toast('Database needs updating: run supabase/08_archived_section.sql in Supabase. Your changes are safe and waiting.', null, null, 20000);
     }
   }
 
@@ -393,8 +393,14 @@
   function active() {
     return Store.items.filter(function (i) { return !i.archived_at; });
   }
+  // The Archive: deleted items — but not jobs. A job taken off the list is a
+  // completed job, kept on the Jobs tab for reviews (1.14), not in here.
   function archived() {
-    return Store.items.filter(function (i) { return !!i.archived_at; })
+    return Store.items.filter(function (i) { return !!i.archived_at && !i.is_job; })
+      .sort(function (a, b) { return a.archived_at < b.archived_at ? 1 : -1; });
+  }
+  function completedJobs() {
+    return Store.items.filter(function (i) { return !!i.archived_at && i.is_job && i.kind === 'task'; })
       .sort(function (a, b) { return a.archived_at < b.archived_at ? 1 : -1; });
   }
   /* the section header a row sits under, or null above the first one */
@@ -606,9 +612,26 @@
     try { renderInner(); } finally { rendering = false; }
   }
 
+  /* Anything under the Jobs heading is a job (1.14): a row added there, made
+     with Enter, or already sitting there. Only ever this way round here —
+     a job stops being one only when it's dragged out (commitDrag), so
+     deleting or moving the Jobs heading can't quietly un-job everything. */
+  function healJobs() {
+    var hid = Store.settings.prefs.jobs_section_id;
+    var h = hid && Store.byId(hid);
+    if (!h || h.archived_at || h.kind !== 'header') return;
+    var inJobs = false, fix = [];
+    active().forEach(function (i) {
+      if (i.kind === 'header') { inJobs = i.id === hid; return; }
+      if (inJobs && !i.is_job) fix.push(i.id);
+    });
+    fix.forEach(function (id) { Store.update(id, { is_job: true }); });
+  }
+
   var renderCount = 0;
   function renderInner() {
     renderCount++;
+    healJobs();
     // commit anything still sitting in a debounce, so the rebuilt rows
     // show what was actually typed rather than the last saved value
     flushAllText();
@@ -762,8 +785,11 @@
       setTimeout(function () {
         if (el.contains(document.activeElement)) return;
         var cur = Store.byId(t.id);
-        if (!cur || cur.archived_at || cur.is_job) return;
-        if ((cur.name || '').trim() || hasAnyNote(cur) || cur.due_date) return;
+        if (!cur || cur.archived_at) return;
+        // A row in the Jobs section is a job from the moment it's made
+        // (1.14), so a blank job goes the same way as a blank task — unless
+        // its Details were filled in on the Jobs tab.
+        if ((cur.name || '').trim() || hasAnyNote(cur) || cur.due_date || (cur.job_notes || '').trim()) return;
         Store.hardDelete(cur.id);
       }, 60);
     }
@@ -1221,18 +1247,45 @@
     var jobs = jobsList();
     $('#jobs-empty').hidden = jobs.length > 0;
     jobs.forEach(function (j) { box.appendChild(jobEl(j)); });
+    renderDoneJobs();
+  }
+
+  /* Completed jobs (1.14): jobs taken off the todo list, kept for reviews.
+     Folded shut under a band with a count; each opens like any job, still
+     editable, with Reopen (back into the Jobs section) and Delete for good. */
+  var doneOpen = false;
+  function renderDoneJobs() {
+    var box = $('#jobs-done');
+    if (!box) return;
+    box.innerHTML = '';
+    var done = completedJobs();
+    if (!done.length) return;
+    var head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'done-head' + (doneOpen ? ' open' : '');
+    head.setAttribute('aria-expanded', doneOpen ? 'true' : 'false');
+    head.innerHTML = '<span class="caret">' + svgCaret + '</span>';
+    var title = document.createElement('span');
+    title.className = 'done-title'; title.textContent = 'Completed';
+    var count = document.createElement('span');
+    count.className = 'count'; count.textContent = done.length;
+    head.append(title, count);
+    head.onclick = function () { doneOpen = !doneOpen; renderDoneJobs(); };
+    box.appendChild(head);
+    if (!doneOpen) return;
+    done.forEach(function (j) { box.appendChild(jobEl(j, true)); });
   }
 
   /* A job is drawn from the same parts as the todo list, so the two tabs
      read as one app: a section-style band for the name, a white card below
      it, the tracker grid's small caps labels, row lines for the tasks with
      the same highlighter notes, and the list's own quiet "+ task". */
-  function jobEl(j) {
+  function jobEl(j, done) {
     var open = !!openJobs[j.id];
     var tasks = noteTexts(j);
 
     var el = document.createElement('div');
-    el.className = 'jobcard' + (open ? ' open' : '');
+    el.className = 'jobcard' + (open ? ' open' : '') + (done ? ' done' : '');
     el.dataset.id = j.id;
 
     var head = document.createElement('div');
@@ -1269,10 +1322,20 @@
 
     var del = document.createElement('button');
     del.type = 'button'; del.className = 'delbtn'; del.innerHTML = svgX;
-    del.setAttribute('aria-label', 'Delete job');
-    del.onclick = function (e) { e.stopPropagation(); deleteItem(j); };
+    del.setAttribute('aria-label', done ? 'Delete job for good' : 'Delete job');
+    del.onclick = function (e) { e.stopPropagation(); done ? deleteDoneJob(j) : deleteItem(j); };
 
-    head.append(caret, name, count, del);
+    var when = null;
+    if (done) {
+      when = document.createElement('span');
+      when.className = 'done-when';
+      // the local date — the stored time is UTC, a day behind before 10-11am
+      var at = new Date(j.archived_at);
+      when.textContent = 'completed ' + fmtDate(at.getFullYear() + '-' + pad(at.getMonth() + 1) + '-' + pad(at.getDate()));
+    }
+    head.append(caret, name, count);
+    if (when) head.appendChild(when);
+    head.appendChild(del);
     head.addEventListener('click', function (e) {
       if (e.target.closest('button')) return;
       if (e.target === name && (open || !touchUI())) return;   // editing the name
@@ -1311,18 +1374,38 @@
 
     var foot = document.createElement('div');
     foot.className = 'job-foot';
-    var show = document.createElement('button');
-    show.type = 'button'; show.className = 'btn ghost small'; show.textContent = 'Show in Todo';
-    show.onclick = function () {
-      openRowId = j.id;
-      switchTab('todo');
-      scrollToIn('#list', j.id);
-    };
-    foot.appendChild(show);
+    if (done) {
+      var reopen = document.createElement('button');
+      reopen.type = 'button'; reopen.className = 'btn ghost small'; reopen.textContent = 'Reopen';
+      reopen.title = 'Put it back in the Jobs section of the todo list';
+      reopen.onclick = function () {
+        Store.restore(j.id, jobsSectionSlot());
+        render();
+        toast('“' + (j.name || 'Untitled').slice(0, 40) + '” is back in the Jobs section.');
+      };
+      foot.appendChild(reopen);
+    } else {
+      var show = document.createElement('button');
+      show.type = 'button'; show.className = 'btn ghost small'; show.textContent = 'Show in Todo';
+      show.onclick = function () {
+        openRowId = j.id;
+        switchTab('todo');
+        scrollToIn('#list', j.id);
+      };
+      foot.appendChild(show);
+    }
 
     card.append(dl, details, tl, list, foot);
     el.appendChild(card);
     return el;
+  }
+
+  function deleteDoneJob(j) {
+    askConfirm({
+      title: 'Delete “' + (j.name || 'Untitled').slice(0, 40) + '” for good?',
+      message: 'It’s a completed job, kept for reviews. This removes it and everything in it, on every device. There is no undo.',
+      confirmLabel: 'Delete'
+    }, function () { Store.hardDelete(j.id); render(); });
   }
 
   function dueClass(d) {
@@ -1502,9 +1585,58 @@
       toast('Section “' + label + '” deleted', 'Undo', function () { Store.restore(it.id); });
       return;
     }
-    Store.archive(it.id);
+    // Which section it was in, so Restore can put it back there (1.14).
+    var h = sectionHeaderOf(it);
+    Store.archive(it.id, { archived_section: h ? h.id : null });
     closeNotePop(); closeDatePop();
-    toast('Deleted “' + label + '”', 'Undo', function () { Store.restore(it.id); });
+    toast(it.is_job ? 'Job “' + label + '” moved to Completed, on the Jobs tab' : 'Deleted “' + label + '”',
+      'Undo', function () { Store.restore(it.id); });
+  }
+
+  /* Where a restored item goes (1.14): back in the section it was deleted
+     from — at its old spot if that's still inside the section, otherwise
+     at the bottom of it. Section gone: the bottom of the list, as before,
+     and `lost` says so. An item deleted before 1.14 has no section on
+     record, so its old spot decides. A job goes back to the Jobs section. */
+  function restoreSlot(it) {
+    if (it.is_job) return { pos: jobsSectionSlot() };
+    var list = active();
+    var endOfList = function () {
+      var last = list[list.length - 1];
+      return last ? last.position + 1024 : 1024;
+    };
+    var h = it.archived_section ? Store.byId(it.archived_section) : null;
+    if (it.archived_section && (!h || h.archived_at || h.kind !== 'header')) {
+      return { pos: endOfList(), lost: h ? (h.name || 'Untitled') : '' };
+    }
+    if (!h) {
+      // no record: its old spot, if it's still a free spot in the list
+      var taken = list.some(function (x) { return x.position === it.position; });
+      return { pos: taken ? endOfList() : it.position };
+    }
+    var at = list.indexOf(h), end = at + 1;
+    while (end < list.length && list[end].kind !== 'header') end++;
+    var next = list[end] || null;
+    var inside = it.position > h.position && (!next || it.position < next.position) &&
+      !list.some(function (x) { return x.position === it.position; });
+    if (inside) return { pos: it.position };
+    var ps = positionsBetween(list[end - 1].position, next ? next.position : null, 1);
+    if (!ps) { renormalise(); return restoreSlot(Store.byId(it.id) || it); }
+    return { pos: ps[0] };
+  }
+
+  function restoreItem(it) {
+    if (it.kind === 'header') {
+      var list = active(), last = list[list.length - 1];
+      Store.restore(it.id, last ? last.position + 1024 : 1024);
+      return;
+    }
+    var slot = restoreSlot(it);
+    Store.restore(it.id, slot.pos != null ? slot.pos : undefined);
+    if (slot.lost != null) {
+      toast('Its section' + (slot.lost ? ' “' + slot.lost + '”' : '') + ' was deleted, so it’s at the bottom of the list.',
+        null, null, 8000);
+    }
   }
 
   /* ============================================================
@@ -1844,9 +1976,22 @@
         return ids.indexOf(n.dataset.id) < 0;
       });
       var beforeId = null, lineY = null, lineEl = null;
+      var movingSection = (Store.byId(ids[0]) || {}).kind === 'header';
       for (var i = 0; i < slots.length; i++) {
         var r = slots[i].getBoundingClientRect();
-        if (y < r.top + r.height / 2) { beforeId = slots[i].dataset.id; lineY = r.top - 1; lineEl = slots[i]; break; }
+        if (y < r.top + r.height / 2) {
+          beforeId = slots[i].dataset.id; lineY = r.top - 1; lineEl = slots[i];
+          // An item dropped just above a heading ends the section ABOVE
+          // that heading, so draw the line under that section's last item
+          // (1.14), not on the heading — where it read as "into the next
+          // section". A whole section moving lands before the heading, so
+          // that line stays put.
+          if (!movingSection && i > 0 && slots[i].classList.contains('hdr')) {
+            var pr = slots[i - 1].getBoundingClientRect();
+            lineY = pr.bottom - 1; lineEl = slots[i - 1];
+          }
+          break;
+        }
       }
       if (beforeId === null) {
         var lastEl = slots[slots.length - 1];
@@ -1913,6 +2058,21 @@
     var plan = planMove(ids, beforeId);
     if (!plan) { renormalise(); return setTimeout(function () { commitDrag(ids, beforeId); }, 0); }
     Store.updateMany(plan);
+    // Dragged out of the Jobs section: no longer a job (1.14). Its Details
+    // stay on the item, unseen, and come back if it's dragged in again.
+    // (Dragged in, it becomes one as the list is drawn — healJobs.)
+    var hid = Store.settings.prefs.jobs_section_id;
+    var jh = hid && Store.byId(hid);
+    if (jh && !jh.archived_at) {
+      var left = [];
+      ids.forEach(function (id) {
+        var it = Store.byId(id);
+        if (!it || it.kind !== 'task' || !it.is_job) return;
+        var sh = sectionHeaderOf(it);
+        if (!sh || sh.id !== hid) { Store.update(id, { is_job: false }); left.push(it.name || 'Untitled'); }
+      });
+      if (left.length === 1) toast('“' + left[0].slice(0, 40) + '” is an ordinary task again — off the Jobs tab.');
+    }
     render();
   }
 
@@ -4040,10 +4200,7 @@
       var r = document.createElement('button');
       r.className = 'btn small'; r.textContent = 'Restore';
       r.onclick = function () {
-        var list2 = active();
-        var last = list2[list2.length - 1];
-        var slot = it.is_job ? jobsSectionSlot() : null;
-        Store.restore(it.id, slot != null ? slot : (last ? last.position + 1024 : 1024));
+        restoreItem(it);
         delete archSel[it.id];
         fillArchive(); render();
       };
@@ -4177,7 +4334,9 @@
     guessColour: guessColour, daysUntil: daysUntil, dueLabel: dueLabel,
     dueLabelShort: dueLabelShort, dueLabelHtml: dueLabelHtml,
     askConfirm: askConfirm, fillArchive: fillArchive, parseVersion: parseVersion,
-    toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, paintStatus: paintStatus,
+    toggleRow: toggleRow, toggleJob: toggleJob, createJob: createJob, jobsList: jobsList, completedJobs: completedJobs,
+    restoreItem: restoreItem, restoreSlot: restoreSlot, commitDrag: commitDrag, healJobs: healJobs,
+    archived: archived, setDoneOpen: function (v) { doneOpen = !!v; }, paintStatus: paintStatus,
     ensureJobsSection: ensureJobsSection, touchUI: touchUI, closeOpenRow: closeOpenRow,
     openRow: function () { return openRowId; },
     extraNotes: extraNotes, noteTexts: noteTexts, getNote: getNote, setNote: setNote, NUM_MAX: NUM_MAX,
