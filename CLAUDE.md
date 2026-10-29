@@ -119,7 +119,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   selecting a word; single click/tap still edits. On a job row the phone's
   double-tap no longer opens-and-edits. The date, × and grip are left out.
 
-**v1.14 (built 29 Oct; not yet uploaded). Needs `supabase/08_archived_section.sql` first.**
+**v1.14 (live from 29 Oct — he ran 08 and uploaded it; Completed, the drag line and restore confirmed working).**
 - **The Jobs section and the Jobs tab are one thing.** Any task under the Jobs heading
   is a job: added there, made there with Enter, dragged in, or already sitting there
   (`healJobs`, run as the list draws — one way only). Dragged *out*, it's an ordinary
@@ -141,7 +141,16 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   on the next section's heading (it was where the drop landed — only the line was
   wrong). Moving a whole section still draws it on the heading it goes before.
 
-Current version is **1.14** (see `config.js`); **1.13** is what's live.
+**v1.14.1 (built 29 Oct; not yet uploaded).** No SQL step.
+- **Fixed: his Jobs section wasn't the Jobs section.** On the live 1.14 nothing in
+  his "Jobs" section became a job — not what was there, not "+ task", not drags in.
+  1.14 recognised only the heading whose id is `prefs.jobs_section_id`; his "Jobs"
+  heading wasn't that one. Now `isJobsHeader` counts that heading **and any heading
+  named "Jobs"** (any case), and `findJobsHeader` adopts the first such heading as
+  the one on record when the recorded one is missing or deleted (copying the old
+  presets across, or the Jobs defaults). Trap 25.
+
+Current version is **1.14.1** (see `config.js`); **1.14** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -161,11 +170,10 @@ colours to his own choices — leave them alone unless he asks.
 
 As of 29 October 2026.
 
-**To ship 1.14:** **run `supabase/08_archived_section.sql` first** (adds
-`items.archived_section`; until it's run, deleting a task is rejected — "Needs DB
-update", the toast names 08 — and waits on the device). Then upload (see Uploading —
-he often runs the script himself), confirm the live `config.js` says `1.14`, then
-Settings → Check for updates on both devices. 01–07 have all been run. Optional tidy: delete
+**To ship 1.14.1:** upload (see Uploading — he often runs the script himself),
+confirm the live `config.js` says `1.14.1`, then Settings → Check for updates on both
+devices, and ask him whether everything in his Jobs section is now on the Jobs tab.
+Every SQL file, 01–08, has been run (08 confirmed 29 Oct). Optional tidy: delete
 `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
 **After 1.9 (live 2 Oct), still to confirm with him:** both devices updated, the
@@ -206,17 +214,18 @@ label for a job's free writing.
 
 ### Verification status
 
-Run on 29 October 2026 against v1.14, on the work PC:
+Run on 29 October 2026 against v1.14.1, on the work PC:
 
 | Suite | Result |
 |---|---|
 | Logic (`tools/test-logic.js`) | **251/251 passed** — incl. the preset migration, guessed days, note numbers |
 | Sync (`tools/test-sync.js`) | **16/16 passed** — the real `sb.js` as two devices on one pretend database |
-| DOM (`tools/run-dom-tests.py`) | **365/365 desktop, 349/349 tablet and phone** (side by side is desktop-only) |
+| DOM (`tools/run-dom-tests.py`) | **376/376 desktop, 360/360 tablet and phone** (side by side is desktop-only) |
 | Real-touch probes (phone only) | **61/61** — genuine fingertip taps, double-taps and drags on an emulated Galaxy A25 |
 
 1.14's fixes were each undone in turn (the drop line, `healJobs`, recording the
-section on ×) and the suite failed every time.
+section on ×) and the suite failed every time. For 1.14.1, putting back the id-only
+check fails 9 checks at every viewport (test 11g2, a hand-made "Jobs" heading).
 
 The preset-tap probe was run against the 1.11 `app.js` too: it caught the chips at
 (8, 6), the top-left corner — his bug, reproduced.
@@ -713,6 +722,12 @@ These all cost real debugging time. Each has a regression test now.
     dates first came from `archived_at.slice(0, 10)` — the UTC date, a day behind
     before 10–11am. Only a screenshot taken in the morning showed it. Build the date
     from `new Date(iso)`'s local parts (as the completed-job card now does).
+
+25. **Tests that only use the app's own data miss his.** 1.14 passed every suite and
+    did nothing on the live app: the tests always made the Jobs heading through the
+    app, so it was always the one on record, and his own "Jobs" heading never was.
+    Match a section he'd recognise by name as well as by id (`isJobsHeader`), and
+    when writing a test, ask what his real list looks like that the fixture doesn't.
 
 ---
 

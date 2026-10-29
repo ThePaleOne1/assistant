@@ -617,12 +617,10 @@
      a job stops being one only when it's dragged out (commitDrag), so
      deleting or moving the Jobs heading can't quietly un-job everything. */
   function healJobs() {
-    var hid = Store.settings.prefs.jobs_section_id;
-    var h = hid && Store.byId(hid);
-    if (!h || h.archived_at || h.kind !== 'header') return;
+    findJobsHeader();
     var inJobs = false, fix = [];
     active().forEach(function (i) {
-      if (i.kind === 'header') { inJobs = i.id === hid; return; }
+      if (i.kind === 'header') { inJobs = isJobsHeader(i); return; }
       if (inJobs && !i.is_job) fix.push(i.id);
     });
     fix.forEach(function (id) { Store.update(id, { is_job: true }); });
@@ -1182,10 +1180,38 @@
      above the first section, never at the very top of the list: anything
      sitting above the first header belongs to no section, and a header put
      in front of it would quietly adopt it. */
-  function ensureJobsSection(depth) {
+  /* Which headings are the Jobs section: the one the app keeps the id of,
+     and any heading simply called "Jobs". The id alone wasn't enough
+     (1.14.1): a "Jobs" heading typed by hand, or one left from another
+     device, isn't the one on record, so nothing under it became a job. */
+  function isJobsHeader(h) {
+    if (!h || h.kind !== 'header' || h.archived_at) return false;
+    return h.id === Store.settings.prefs.jobs_section_id || /^\s*jobs\s*$/i.test(h.name || '');
+  }
+
+  /* The Jobs heading on record, or — when that's missing or deleted — the
+     first heading called "Jobs", which then becomes the one on record
+     (taking the old one's presets if it has none). Never makes one. */
+  function findJobsHeader() {
     var p = Store.settings.prefs;
     var h = p.jobs_section_id ? Store.byId(p.jobs_section_id) : null;
     if (h && !h.archived_at && h.kind === 'header') return h;
+    h = active().filter(function (i) { return i.kind === 'header' && isJobsHeader(i); })[0];
+    if (!h) return null;
+    var map = Object.assign({}, p.section_presets || {});
+    if (!Array.isArray(map[h.id])) {
+      map[h.id] = clonePresets(Array.isArray(map[p.jobs_section_id]) ? map[p.jobs_section_id] : Store.JOB_PRESET_DEFAULTS);
+    }
+    p.section_presets = map;
+    p.jobs_section_id = h.id;
+    Store.saveSettings({ prefs: p });
+    return h;
+  }
+
+  function ensureJobsSection(depth) {
+    var p = Store.settings.prefs;
+    var h = findJobsHeader();
+    if (h) return h;
 
     var list = active();
     var fi = -1;
@@ -2061,15 +2087,12 @@
     // Dragged out of the Jobs section: no longer a job (1.14). Its Details
     // stay on the item, unseen, and come back if it's dragged in again.
     // (Dragged in, it becomes one as the list is drawn — healJobs.)
-    var hid = Store.settings.prefs.jobs_section_id;
-    var jh = hid && Store.byId(hid);
-    if (jh && !jh.archived_at) {
+    if (findJobsHeader()) {
       var left = [];
       ids.forEach(function (id) {
         var it = Store.byId(id);
         if (!it || it.kind !== 'task' || !it.is_job) return;
-        var sh = sectionHeaderOf(it);
-        if (!sh || sh.id !== hid) { Store.update(id, { is_job: false }); left.push(it.name || 'Untitled'); }
+        if (!isJobsHeader(sectionHeaderOf(it))) { Store.update(id, { is_job: false }); left.push(it.name || 'Untitled'); }
       });
       if (left.length === 1) toast('“' + left[0].slice(0, 40) + '” is an ordinary task again — off the Jobs tab.');
     }

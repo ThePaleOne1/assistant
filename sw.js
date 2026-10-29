@@ -8,7 +8,7 @@
    always go straight to the network so data is never stale.
    ============================================================ */
 
-var CACHE = 'assistant-v8';
+var CACHE = 'assistant-v9';
 
 var SHELL = [
   './',
