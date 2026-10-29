@@ -153,7 +153,7 @@ from the app's existing parts (see "New UI is built from existing parts" below).
   "Jobs" — the app made one when it needed one). He dragged his jobs into it; no
   duplicates, all linked. His old heading is his to delete or keep.
 
-**v1.15 (built 29 Oct; not yet uploaded).** No SQL step. Asked with the question tool:
+**v1.15 (live from 29 Oct — he uploaded it; phone confirmed right).** No SQL step. Asked with the question tool:
 draggable divider on the phone, open on the last job, names only in the list, drag on
 both.
 - **The Jobs tab is a list and an open job.** Wide screens (760px+): the list down the
@@ -176,7 +176,14 @@ both.
   buttons and the notes run full width underneath, lined up with the name. Wider
   screens unchanged.
 
-Current version is **1.15** (see `config.js`); **1.14.1** is what's live.
+**v1.15.1 (built 30 Oct; not yet uploaded).** No SQL step.
+- **Fixed: on his PC, 1.15 arrived with 1.14's stylesheet** — the Jobs tab unstyled
+  (list under the job, plain text, browser-default buttons, no drop line). The live
+  site was serving the right files; Firefox had taken a copy of `styles.css` it
+  still held. The service worker now fetches app files with `cache: 'no-cache'`, so
+  every load asks GitHub (a tiny "not modified" when nothing changed). Trap 27.
+
+Current version is **1.15.1** (see `config.js`); **1.15** is what's live.
 
 **Deploys can lag.** On 22 Sep both uploads reached GitHub at 9:04 and 10:57 but the
 site kept serving 1.4 for a while before GitHub Pages caught up. If a push landed
@@ -196,9 +203,10 @@ colours to his own choices — leave them alone unless he asks.
 
 As of 29 October 2026.
 
-**To ship 1.15:** upload (see Uploading — he often runs the script himself),
-confirm the live `config.js` says `1.15`, then Settings → Check for updates on both
-devices. Ask him how the phone's divider and list feel in real use, and whether the
+**To ship 1.15.1:** upload (see Uploading — he often runs the script himself),
+confirm the live `config.js` says `1.15.1`, then Settings → Check for updates on both
+devices. Then ask him whether the PC's Jobs tab looks like the phone's (list on the
+left, job on the right, blue line when dragging). Also ask him how the phone's divider and list feel in real use, and whether the
 Jobs tab looks right in Firefox (layout only checked in Chromium). Every SQL file, 01–08, has been run (08 confirmed 29 Oct). Optional tidy: delete
 `supabase/06_subtasks_jobs.sql`, a superseded stub.
 
@@ -767,6 +775,17 @@ These all cost real debugging time. Each has a regression test now.
     somewhere harmless after a swipe (`tap_el('.appbar-title')`). Logging the event
     sequence is what showed it; two wrong theories (a redraw mid-tap, frame timing)
     were ruled out first. A fresh page tapped fine every time.
+
+27. **Network-first still took the browser's own copy.** The service worker's
+    `fetch(req)` goes through the HTTP cache, and GitHub Pages lets a browser keep a
+    file for 10 minutes (`max-age=600`). So a page loaded just after an upload could
+    pair the new `index.html` with the old `styles.css`: on his PC 1.15's Jobs tab
+    came up with 1.14's CSS and looked completely broken, while the phone was fine.
+    It looked like a Firefox layout bug; the giveaway was that *every* new rule was
+    missing, and an old one (`.seg`) still applied. Fixed by `cache: 'no-cache'`
+    (a navigation is re-fetched by URL, since a navigate Request can't take
+    options). When one device shows a change half-applied, suspect a mix of old and
+    new files before suspecting the browser engine.
 
 ---
 

@@ -8,7 +8,7 @@
    always go straight to the network so data is never stale.
    ============================================================ */
 
-var CACHE = 'assistant-v10';
+var CACHE = 'assistant-v11';
 
 var SHELL = [
   './',
@@ -76,9 +76,19 @@ self.addEventListener('fetch', function (e) {
   // update, which is baffling when you've just changed something. This way
   // you always get the current app when you have signal, and the cached one
   // when you don't. The files are small, so the difference isn't felt.
+  //
+  // 'no-cache' asks GitHub each time instead of taking the browser's own
+  // copy (Pages lets it keep one for 10 minutes): otherwise a page fetched
+  // just after an upload could arrive with a stylesheet from just before it
+  // — 1.15's new HTML with 1.14's CSS, on his PC. Unchanged files come back
+  // as a tiny "not modified". A navigation can't be re-made from its own
+  // Request with options, so that one goes by URL.
   if (url.origin === self.location.origin) {
+    var fresh = req.mode === 'navigate'
+      ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+      : fetch(req, { cache: 'no-cache' });
     e.respondWith(
-      fetch(req).then(function (res) {
+      fresh.then(function (res) {
         if (res && res.ok) {
           var copy = res.clone();
           caches.open(CACHE).then(function (c) { c.put(req, copy); });
